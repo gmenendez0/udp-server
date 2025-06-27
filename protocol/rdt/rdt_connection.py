@@ -58,6 +58,8 @@ class RdtConnection:
             self.request_queue.get_nowait()
         self.is_active = False
 
+        self._stop_retransmission_timer()
+
         logger.info(f"Conexión {self.address} cerrada")
 
     def process_requests(self) -> None:
