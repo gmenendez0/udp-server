@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # ================================[CONSTANTES]===============================
 SERVER_SEQ_NUM_START = 0
-CONNECTION_TIMEOUT = 30  # 30 segundos de timeout de conexión
+CONNECTION_TIMEOUT = 5.0  # 30 segundos de timeout de conexión
 DATA_WAIT_TIMEOUT = 5    # 5 segundos esperando primer paquete de datos después del handshake
 DATA_WAIT_MAX_ATTEMPTS = 3  # Máximo 3 intentos de reenvío del ACK
 
@@ -32,49 +32,131 @@ class RdtConnection:
         self.seq_num: Optional[int] = None
         self.ref_num: Optional[int] = None
         self.max_window: Optional[int] = None
-        self.request_queue: Queue[bytes] = Queue()
-        self.data_handler: DataHandler = DataHandler()
-        self.is_active = True
-        self.last_activity = time.time()
-        self.handshake_completed = False
-        self.handshake_ack_sent = False
-        self.waiting_first_data = False  # NUEVO: Esperando primer paquete de datos
-        self.data_wait_attempts = 0  # NUEVO: Contador de intentos esperando datos
-        self.data_wait_timer = None  # NUEVO: Timer para esperar datos
 
-# ================================[PROCESAMIENTO PRINCIPAL]===============================
+        self.request_queue: Queue[bytes] = Queue()
+        self.last_activity = time.time()
+        self.connection_established: bool = False
+        self.is_active = True
+
+        self.data_handler: DataHandler = DataHandler()
+
+    def add_request(self, data: bytes) -> None:
+        self.request_queue.put(data)
+
+    def shutdown(self) -> None:
+        logger.info(f"Iniciando shutdown de conexión {self.address}")
+
+        while not self.request_queue.empty():
+            self.request_queue.get_nowait()
+        self.is_active = False
+
+        logger.info(f"Conexión {self.address} cerrada")
+
     def process_requests(self) -> None:
-        """Procesa todas las peticiones de la conexión"""
         logger.info(f"Iniciando procesamiento de conexión para {self.address}")
         
         while self.is_active:
-            try:
-                # Verificar timeout de conexión general
-                if time.time() - self.last_activity > CONNECTION_TIMEOUT:
-                    logger.warning(f"Timeout de conexión para {self.address}")
-                    self.shutdown() 
-                    break
-                
-                # Procesar mensajes
-                request = self._get_next_message()
-                if request is not None:
-                    self.last_activity = time.time()
-                    self._process_message(request)
-                
-                    
-            except Exception as e:
-                logger.error(f"Error en procesamiento para {self.address}: {e}")
-                self._handle_connection_error()
-                break
-        
-        logger.info(f"Conexión cerrada para {self.address}")
+            # Verificar timeout
+            if time.time() - self.last_activity > CONNECTION_TIMEOUT:
+                logger.warning(f"Timeout de conexión para {self.address}")
+                self.shutdown()
+                return
+
+            # Procesar mensajes
+            request = self._get_next_message()
+            if request is not None:
+                self.last_activity = time.time()
+                self._process_message(request)
 
     def _get_next_message(self) -> Optional[bytes]:
-        """Obtiene el siguiente mensaje de la cola, retorna None si no hay mensajes"""
         try:
             return self.request_queue.get(timeout=1.0)
         except Empty:
             return None
+
+    def _process_message1(self, request: bytes) -> None:
+        rdt_request = RdtRequest(address=self.address, request=request)
+
+        if not self.connection_established:
+            self._handle_handshake_message(rdt_request)
+        if rdt_request.is_ack():
+           self._handle_ack_message1(rdt_request)
+        if rdt_request.is_data():
+            self._handle_data_message1(rdt_request)
+
+    def _handle_handshake_message(self, rdt_request: RdtRequest) -> None:
+        """Maneja mensajes de handshake"""
+        if rdt_request.message.flag != FLAG_HANDSHAKE:
+            logger.warning(f"Se esperaba mensaje de handshake (FLAG=0) de {self.address}, se recibió FLAG={rdt_request.message.flag}. Ignorando.")
+            # BUG ACA REVISAR
+            return
+
+        if not self._validate_handshake_message(rdt_request):
+            logger.error(f"Request de handshake inválido de {self.address}. Ignorando.")
+            # BUG ACA REVISAR
+            return
+
+        logger.info(f"Handshake recibido de {self.address} with max_window: {rdt_request.get_max_window()}, seq_num: {rdt_request.get_seq_num()}")
+
+        self.max_window = rdt_request.get_max_window()
+        self.ref_num = rdt_request.get_seq_num() + 1
+        self.seq_num = SERVER_SEQ_NUM_START
+
+        self._send_handshake_ack()
+        self.connection_established = True
+
+    def _validate_handshake_message(self, rdt_request: RdtRequest) -> bool:
+        if rdt_request.get_max_window() is None or rdt_request.get_max_window() <= 0:
+            logger.error(f"Max window inválido: {rdt_request.get_max_window()}")
+            return False
+
+        if rdt_request.get_seq_num() is None or rdt_request.get_seq_num() < 0:
+            logger.error(f"Seq num inválido: {rdt_request.get_seq_num()}")
+            return False
+
+        return True
+
+    def _send_handshake_ack(self) -> None:
+        ack_response = RdtResponse.new_ack_response(self.max_window, self.seq_num, self.ref_num)
+        self._send_response(ack_response.message.to_bytes())
+        logger.info(f"ACK de handshake enviado a {self.address}")
+
+    def _handle_data_message1(self, rdt_request: RdtRequest) -> None:
+        pass
+        #1. Mandar ACK
+        while pkg_on_fly < max_window && QuedanPaqsPorEnviar: max window = 3 y mandar 5 paqs
+            nuevo pkg = service.getNextPkg()
+            enviarPkg()
+            pkg_on_fly++
+            quedanPaqsPorEnviar = service.QuedanPaqsPorEnviar
+
+        #2. Procesar rdt req con data handler y obtener rta en bytes
+        #3. Si hay una rta para enviar, enviarla
+
+    def _handle_ack_message1(self, rdt_request: RdtRequest) -> None:
+        pass
+        # 1. Analizo... ACK de que?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     def _process_message(self, request: bytes) -> None:
         """Procesa un mensaje recibido"""
@@ -183,40 +265,6 @@ class RdtConnection:
             logger.error(f"Error enviando respuesta a {self.address}: {e}")
             raise  # Re-lanzar para que el método llamador pueda manejarlo
 
-    def _send_handshake_ack(self) -> None:
-        """Envía el ACK del handshake al cliente"""
-        try:
-            if not all([self.max_window is not None, self.seq_num is not None, self.ref_num is not None]):
-                raise ValueError("Parámetros de handshake no configurados correctamente")
-            
-            ack_response = RdtResponse.new_ack_response(self.max_window, self.seq_num, self.ref_num)
-            self._send_response(ack_response.message.to_bytes())
-            logger.info(f"ACK de handshake enviado a {self.address}")
-        except Exception as e:
-            logger.error(f"Error enviando ACK de handshake a {self.address}: {e}")
-            raise  # Re-lanzar para que el método llamador pueda manejarlo
-
-# ================================[VALIDACIÓN]===============================
-    def _validate_handshake_request(self, rdt_request: RdtRequest) -> bool:
-        """Valida que el request de handshake sea válido"""
-        try:
-            max_window = rdt_request.get_max_window()
-            seq_num = rdt_request.get_seq_num()
-            
-            # Validaciones básicas
-            if max_window is None or max_window <= 0:
-                logger.error(f"Max window inválido: {max_window}")
-                return False
-            
-            if seq_num is None or seq_num < 0:
-                logger.error(f"Seq num inválido: {seq_num}")
-                return False
-            
-            return True
-        except Exception as e:
-            logger.error(f"Error validando handshake request: {e}")
-            return False
-
 # ================================[MANEJO DE ERRORES]===============================
     def _handle_handshake_error(self) -> None:
         """Maneja errores durante el handshake"""
@@ -283,33 +331,6 @@ class RdtConnection:
         except Exception as e:
             logger.error(f"Error en timeout de espera de datos: {e}")
             self.is_active = False
-
-# ================================[API PÚBLICA]===============================
-    def add_request(self, data: bytes) -> None:
-        """Añade una nueva petición a la cola"""
-        try:
-            if not data:
-                logger.warning("Intentando agregar request vacío")
-                return
-            
-            self.request_queue.put(data)
-        except Exception as e:
-            logger.error(f"Error agregando request a la cola: {e}")
-
-    def shutdown(self) -> None:
-        """Cierra la conexión y libera recursos"""
-        logger.info(f"Iniciando shutdown de conexión {self.address}")
-        self.is_active = False
-        self._stop_data_wait_timer()  # Detener timer al cerrar
-        
-        # Limpiar la cola de requests pendientes
-        try:
-            while not self.request_queue.empty():
-                self.request_queue.get_nowait()
-        except Empty:
-            pass  # La cola ya está vacía
-        
-        logger.info(f"Conexión {self.address} cerrada")
 
 # ================================[REPOSITORIO ABSTRACTO]===============================
 class RdtConnectionRepository(ABC):
