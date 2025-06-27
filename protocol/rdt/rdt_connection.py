@@ -15,11 +15,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 SERVER_SEQ_NUM_START = 0
-CONNECTION_TIMEOUT = 7.0        # Segundos de timeout de conexión
+CONNECTION_TIMEOUT = 7.0            # Segundos de timeout de conexión
 STORAGE_PATH = "files"
-MAX_FILE_SIZE = 5_500_000       # 5.5MB
-RETRANSMISSION_TIMEOUT = 2.0    # Segundos para el timeout de retransmisión
-MAX_RETRANSMISSION_ATTEMPTS = 5  # Máximo de intentos de retransmisión
+MAX_FILE_SIZE = 5_500_000           # 5.5MB
+RETRANSMISSION_TIMEOUT = 2.0        # Segundos para el timeout de retransmisión
+MAX_RETRANSMISSION_ATTEMPTS = 5     # Máximo de intentos de retransmisión
+CHUNK_SIZE = 1024                   # Leer archivo en chunks de 1KB
 
 class RdtConnection:
     def __init__(self, address: str):
@@ -199,7 +200,7 @@ class RdtConnection:
         self.bytes_sent = 0
 
         logger.info(f"Cargando archivo {filename} en memoria de tamaño {filesize} para {self.address}.")
-        self.pending_data_chunks = get_file_in_chunks(filepath, 1024) # Leer archivo en chunks de 1KB
+        self.pending_data_chunks = get_file_in_chunks(filepath, CHUNK_SIZE)
         logger.info(f"Archivo {filename} cargado en memoria. Listo para enviar {len(self.pending_data_chunks)} chunks.")
 
         # Enviar ventana inicial
