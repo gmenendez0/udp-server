@@ -25,9 +25,12 @@ class AsyncUDPServer:
             await self._shutdown()
 
     async def _process_request(self, data: bytes, address: tuple) -> None:
-        print(f"Received {len(data)} bytes from {address}: {data.decode('utf-8', errors='ignore')}")
-        response = self._handler(data)
-        await asyncio.get_running_loop().sock_sendto(self._skt, response, address)
+        try:
+            print(f"Received {len(data)} bytes from {address}: {data.decode('utf-8', errors='ignore')}")
+            response = self._handler(data)
+            await asyncio.get_running_loop().sock_sendto(self._skt, response, address)
+        except Exception as e:
+            print(f"Error processing request from {address}: {e}")
 
     async def _shutdown(self) -> None:
         if self._skt:
