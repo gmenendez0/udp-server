@@ -9,7 +9,6 @@ class AsyncUDPServer:
         self._handler       = handler
         self._buffer_size   = buffer_size
         self._skt           = None
-        self._tasks         = set()
 
     async def serve(self) -> None:
         self._skt = get_udp_socket(self._host, self._port)
@@ -18,15 +17,10 @@ class AsyncUDPServer:
         loop = asyncio.get_running_loop()
 
         try:
-            while True:
-                data, address = await loop.sock_recvfrom(self._skt, self._buffer_size)
-                task = asyncio.create_task(self._process_request(data, address))
-                self._tasks.add(task)
-                task.add_done_callback(self._handle_task_ending)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            print(f"Server error: {e}")
+            async with asyncio.TaskGroup() as tg:
+                while True:
+                    data, address = await loop.sock_recvfrom(self._skt, self._buffer_size)
+                    tg.create_task(self._process_request(data, address))
         finally:
             await self._shutdown()
 
@@ -35,16 +29,7 @@ class AsyncUDPServer:
         response = self._handler(data)
         await asyncio.get_running_loop().sock_sendto(self._skt, response, address)
 
-    def _handle_task_ending(self, task: asyncio.Task) -> None:
-        self._tasks.discard(task)
-        if task.exception():
-            print(f"Task error: {task.exception()}")
-
     async def _shutdown(self) -> None:
-        for task in self._tasks:
-            task.cancel()
-
-        await asyncio.gather(*self._tasks, return_exceptions=True)
         if self._skt:
             self._skt.close()
 
