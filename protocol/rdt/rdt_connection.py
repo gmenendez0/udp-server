@@ -303,7 +303,8 @@ class RdtConnection:
             logger.warning(f"No hay paquetes para retransmitir a {self.address}.")
 
     def _send_ack_response(self, ref_num: int) -> None:
-        ack_response = RdtResponse.new_ack_response(self.max_window, self.seq_num, ref_num)
+        self.ref_num = ref_num
+        ack_response = RdtResponse.new_ack_response(self.max_window, self.seq_num, self.ref_num)
         self._send_response(ack_response.message.to_bytes())
         self.seq_num += 1
         logger.info(f"ACK enviado a {self.address} con ref_num {ref_num}")
