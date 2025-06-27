@@ -1,6 +1,6 @@
 import socket
 
-def get_udp_socket(host: str = "127.0.0.1", port: int = 9999) -> socket.socket:
+def get_udp_socket(host: str, port: int) -> socket.socket:
     return get_socket(socket.SOCK_DGRAM, host, port)
 
 def get_socket(kind: int, host: str, port: int) -> socket.socket:
