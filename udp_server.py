@@ -13,9 +13,9 @@ class AsyncUDPServer:
     async def serve(self) -> None:
         self._skt = get_udp_socket(self._host, self._port)
         self._skt.setblocking(False)
-        print(f"UDP server listening on {self._host}:{self._port}")
         loop = asyncio.get_running_loop()
 
+        print(f"UDP server listening on {self._host}:{self._port}")
         try:
             async with asyncio.TaskGroup() as tg:
                 while True:
