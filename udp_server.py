@@ -4,11 +4,11 @@ from server_helpers import get_udp_socket
 
 class AsyncUDPServer:
     def __init__(self, host: str, port: int, buffer_size: int, handler: Callable[[bytes], bytes]):
-        self._host          = host
-        self._port          = port
-        self._handler       = handler
-        self._buffer_size   = buffer_size
-        self._skt           = None
+        self._host              = host
+        self._port              = port
+        self._handler           = handler
+        self._recv_buffer_size  = buffer_size
+        self._skt               = None
 
     async def serve(self) -> None:
         self._skt = get_udp_socket(self._host, self._port)
@@ -19,7 +19,7 @@ class AsyncUDPServer:
         try:
             async with asyncio.TaskGroup() as tg:
                 while True:
-                    data, address = await loop.sock_recvfrom(self._skt, self._buffer_size)
+                    data, address = await loop.sock_recvfrom(self._skt, self._recv_buffer_size)
                     tg.create_task(self._process_request(data, address))
         finally:
             await self._shutdown()
