@@ -59,6 +59,10 @@ class RdtResponse:
     def new_data_response(cls, max_window: int, seq_num: int, ref_num: int, data: bytes) -> "RdtResponse":
         return cls(flag=FLAG_DATA, max_window=max_window, seq_num=seq_num, ref_num=ref_num, data=data)
 
+    @classmethod
+    def new_last_response(cls, max_window: int, seq_num: int, ref_num: int, data: bytes) -> "RdtResponse":
+        return cls(flag=FLAG_LAST, max_window=max_window, seq_num=seq_num, ref_num=ref_num, data=data)
+
     def is_last(self) -> bool:
         return self.message.flag == FLAG_LAST
 

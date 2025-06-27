@@ -1,35 +1,51 @@
+import os
+import threading
 from abc import ABC, abstractmethod
 from queue import Queue, Empty
+
+from server.file_helpers import get_file_size_in_bytes, get_file_in_chunks, append_bytes_to_file
 from .rdt_message import RdtRequest, RdtResponse
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 import time
 import logging
-from protocol.data_handler.data_handler import DataHandler
 import socket
-import threading
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 SERVER_SEQ_NUM_START = 0
-CONNECTION_TIMEOUT = 5.0  # 30 segundos de timeout de conexión
-ACK_COUNT_FOR_RETRY = 3  # Máximo 3 intentos de reenvío del ACK
+CONNECTION_TIMEOUT = 7.0        # Segundos de timeout de conexión
+STORAGE_PATH = "files"
+MAX_FILE_SIZE = 5_500_000       # 5.5MB
+RETRANSMISSION_TIMEOUT = 2.0    # Segundos para el timeout de retransmisión
+MAX_RETRANSMISSION_ATTEMPTS = 5  # Máximo de intentos de retransmisión
 
 class RdtConnection:
     def __init__(self, address: str):
-        self.address: str = address
-        self.seq_num: Optional[int] = None
-        self.ref_num: Optional[int] = None
-        self.max_window: Optional[int] = None
+        self.address                    : str               = address
+        self.seq_num                    : Optional[int]     = None
+        self.ref_num                    : Optional[int]     = None
+        self.max_window                 : Optional[int]     = None
 
-        self.request_queue: Queue[bytes] = Queue()
-        self.packets_on_fly: list[RdtResponse] = []
-        self.last_activity = time.time()
-        self.connection_established: bool = False
-        self.is_active = True
+        self.request_queue              : Queue[bytes]      = Queue()
+        self.is_active                  : bool              = True
+        self.connection_established     : bool              = False
+        self.packets_on_fly             : list[RdtResponse] = []
+        self.last_activity              : float             = time.time()
 
-        self.data_handler: DataHandler = DataHandler()
+        self.current_operation          : Optional[str]     = None  # "UPLOAD" o "DOWNLOAD"
+        self.current_filename           : Optional[str]     = None
+        self.current_filesize           : Optional[int]     = None   # in bytes
+        self.bytes_sent                 : Optional[int]     = None
+        self.bytes_received             : Optional[int]     = None
+        self.pending_data_chunks        : List[bytes]       = []
+
+        self.next_seq                   : Optional[int]     = 0
+        self.base_seq                   : Optional[int]     = 0
+
+        self.retransmission_timer       : Optional[threading.Timer] = None
+        self.retransmission_attempts    : int = 0
 
     def add_request(self, data: bytes) -> None:
         self.request_queue.put(data)
@@ -65,15 +81,16 @@ class RdtConnection:
         except Empty:
             return None
 
-    def _process_message1(self, request: bytes) -> None:
+    def _process_message(self, request: bytes) -> None:
         rdt_request = RdtRequest(address=self.address, request=request)
 
         if not self.connection_established:
-            self._handle_handshake_message(rdt_request)
+            return self._handle_handshake_message(rdt_request)
+
         if rdt_request.is_ack():
-           self._handle_ack_message1(rdt_request)
-        if rdt_request.is_data():
-            self._handle_data_message1(rdt_request)
+            self._handle_ack_message(rdt_request)
+        elif rdt_request.is_data():
+            self._handle_data_message(rdt_request)
 
     def _handle_handshake_message(self, rdt_request: RdtRequest) -> None:
         """Maneja mensajes de handshake"""
@@ -98,233 +115,212 @@ class RdtConnection:
 
     def _send_handshake_ack(self) -> None:
         ack_response = RdtResponse.new_ack_response(self.max_window, self.seq_num, self.ref_num)
-        self._send_response(ack_response.message.to_bytes())
+        self._send_response(ack_response.message.to_bytes()) #Usamos send_response y no _send_ack porque no queremos incrementar el seq_num
         logger.info(f"ACK de handshake enviado a {self.address}")
 
-    def _handle_data_message1(self, rdt_request: RdtRequest) -> None:
-        pass
-        #1. Mandar ACK
-        # while pkg_on_fly < max_window && QuedanPaqsPorEnviar: max window = 3 y mandar 5 paqs
-        #     nuevo pkg = service.getNextPkg()
-        #     enviarPkg()
-        #     pkg_on_fly++
-        #     quedanPaqsPorEnviar = service.QuedanPaqsPorEnviar
+    def _handle_data_message(self, rdt_request: RdtRequest) -> None:
+        data = rdt_request.get_data().decode('utf-8')
+        logger.info(f"Datos recibidos de {self.address}: {data}")
 
-        #2. Procesar rdt req con data handler y obtener rta en bytes
-        #3. Si hay una rta para enviar, enviarla
+        # Determinar operacion a ejecutar
+        parts = data.split()
+        command = parts[0]
 
-    def _pending_packets(self) -> bool:
-        return self.packets_on_fly[-1].is_last()
+        if command == 'D':
+            filename = parts[1]
+            self._handle_download_request(filename, rdt_request)
+        if command == 'U':
+            filename = parts[1]
+            filesize = int(parts[2])
+            self._handle_upload_request(filename, filesize, rdt_request)
+        elif self.current_operation == "UPLOAD":
+            self._handle_upload_data(rdt_request)
 
-    def _get_next_package(self) -> RdtResponse:
-        pass
+    def _handle_upload_request(self, filename: str, filesize: int, rdt_request: RdtRequest) -> None:
+        logger.info(f"Solicitud de subida de {self.address} para el archivo {filename} de tamaño {filesize}")
+
+        self._send_ack_response(rdt_request.get_seq_num() + 1)
+
+        filepath = os.path.join(STORAGE_PATH, filename)
+        filesize = get_file_size_in_bytes(filepath)
+
+        if filesize > MAX_FILE_SIZE:
+            logger.error(f"Archivo {filename} demasiado grande ({filesize}) para {self.address}")
+            self._send_error_response(b'FILE_TOO_LARGE')
+            self.shutdown()
+            return
+
+        if os.path.isfile(filepath):
+            logger.error(f"Archivo {filename} ya existe para {self.address}")
+            self._send_error_response(b'FILE_ALREADY_EXISTS')
+            self.shutdown()
+            return
+
+        self.current_operation = "UPLOAD"
+        self.current_filename = filename
+        self.current_filesize = filesize
+        self.bytes_received = 0
+
+        self._send_data_response(b"D_OK")
+        logger.info(f"Preparado para recibir archivo {filename} de tamaño {filesize} de {self.address}")
+
+    def _handle_upload_data(self, rdt_request: RdtRequest) -> None:
+        data = rdt_request.get_data()
+        file_data = data[2:]  # Sacar el prefijo "D_"
+
+        filepath = os.path.join(STORAGE_PATH, self.current_filename)
+        append_bytes_to_file(filepath, file_data)
+
+        self.bytes_received += len(file_data)
+        logger.info(f"Recibidos {self.bytes_received}/{self.current_filesize} bytes de {self.address} para el archivo {self.current_filename}")
+
+        self._send_ack_response(rdt_request.get_seq_num() + 1)
+
+        if rdt_request.is_last() or self.bytes_received >= self.current_filesize:
+            logger.info(f"Archivo {self.current_filename} recibido completamente de {self.address}")
+            self.shutdown()
+
+    def _handle_download_request(self, filename: str, rdt_request: RdtRequest) -> None:
+        logger.info(f"Solicitud de descarga de {self.address} para el archivo {filename}")
+
+        self._send_ack_response(rdt_request.get_seq_num() + 1)
+        filepath = os.path.join(STORAGE_PATH, filename)
+        filesize = get_file_size_in_bytes(filepath)
+
+        if filesize is None:
+            logger.error(f"Archivo {filename} no encontrado para {self.address}")
+            self._send_error_response(b'FILE_NOT_FOUND')
+            self.shutdown()
+            return
+
+        self.current_operation = "DOWNLOAD"
+        self.current_filename = filename
+        self.current_filesize = filesize
+        self.bytes_sent = 0
+
+        logger.info(f"Cargando archivo {filename} en memoria de tamaño {filesize} para {self.address}.")
+        self.pending_data_chunks = get_file_in_chunks(filepath, 1024) # Leer archivo en chunks de 1KB
+        logger.info(f"Archivo {filename} cargado en memoria. Listo para enviar {len(self.pending_data_chunks)} chunks.")
+
+        # Enviar ventana inicial
+        self._send_window_packages()
 
     def _send_window_packages(self) -> None:
-        while len(self.packets_on_fly) < self.max_window and self._pending_packets():
-            pass
-            # nuevo pkg = service.getNextPkg()
-            # enviarPkg()
-            # pkg_on_fly++
-            # quedanPaqsPorEnviar = service.QuedanPaqsPorEnviar
+        packets_sent = 0
 
-    def _handle_ack_message1(self, rdt_request: RdtRequest) -> None:
-        pass
-        # 1. Analizo... ACK de que?
+        while len(self.packets_on_fly) < self.max_window and len(self.pending_data_chunks) > 0:
+            chunk = self.pending_data_chunks.pop(0)
+            data_with_prefix = b"D_" + chunk
 
+            is_last = len(self.pending_data_chunks) == 0
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    def _process_message(self, request: bytes) -> None:
-        """Procesa un mensaje recibido"""
-        try:
-            rdt_request = RdtRequest(address=self.address, request=request)
-            
-            # Procesar según el estado de la conexión
-            if not self.handshake_ack_sent:
-                # Esperamos el primer mensaje con FLAG = HANDSHAKE (0)
-                self._handle_initial_handshake(rdt_request)
-            elif self.waiting_first_data:
-                # Esperamos el primer paquete de datos
-                self._handle_first_data_packet(rdt_request)
-            elif self.handshake_completed:
-                self._handle_data_message(rdt_request)
+            if not is_last:
+                response = RdtResponse.new_data_response(self.max_window, self.seq_num, self.ref_num, data_with_prefix)
             else:
-                logger.warning(f"Mensaje recibido en estado inesperado de {self.address}")
-                
-        except Exception as e:
-            logger.error(f"Error procesando mensaje de {self.address}: {e}")
-            self._handle_message_error()
+                response = RdtResponse.new_last_response(self.max_window, self.seq_num, self.ref_num, data_with_prefix)
 
-# ================================[MANEJO DE HANDSHAKE]===============================
-    def _handle_initial_handshake(self, rdt_request: RdtRequest) -> None:
-        """Maneja el primer mensaje con FLAG = HANDSHAKE (0)"""
-        try:
-            # Validar que sea un mensaje de handshake
-            if rdt_request.message.flag != FLAG_DATA:
-                logger.warning(f"Se esperaba mensaje de handshake (FLAG=0) de {self.address}, se recibió FLAG={rdt_request.message.flag}. Ignorando.")
-                return  # Ignorar cualquier otro mensaje
-            
-            # Validar que el request sea válido
-            if not self._validate_handshake_request(rdt_request):
-                logger.error(f"Request de handshake inválido de {self.address}. Ignorando.")
-                return
-            
-            client_max_window = rdt_request.get_max_window()
-            client_seq_num = rdt_request.get_seq_num()
-            
-            logger.info(f"Handshake inicial recibido de {self.address}")
-            logger.info(f"Client max_window: {client_max_window}, seq_num: {client_seq_num}")
-            
-            # Configurar parámetros
-            self.max_window = client_max_window
-            self.ref_num = client_seq_num + 1
-            self.seq_num = SERVER_SEQ_NUM_START
+            self._send_response(response.message.to_bytes())
 
-            # Enviar ACK e iniciar timer para esperar primer paquete de datos
-            self._send_handshake_ack()
-            self.handshake_ack_sent = True
-            self.waiting_first_data = True  # Ahora esperamos datos, no ACK
-            self._start_data_wait_timer()
-            
-        except Exception as e:
-            logger.error(f"Error en handshake inicial para {self.address}: {e}")
-            self._handle_handshake_error()
+            self.packets_on_fly.append(response)
+            self.next_seq += 1
+            self.bytes_sent += len(chunk)
+            packets_sent += 1
 
-    def _handle_first_data_packet(self, rdt_request: RdtRequest) -> None:
-        """Maneja el primer paquete de datos después del handshake"""
-        try:
-            # Validar que sea un paquete de datos 
-            if not rdt_request.is_data():
-                logger.warning(f"Se esperaba paquete de datos de {self.address}, se recibió FLAG={rdt_request.message.flag}")
-                return
-            
-            logger.info(f"Primer paquete de datos recibido de {self.address}")
-            self.waiting_first_data = False
-            self.handshake_completed = True
-            self._stop_data_wait_timer()
-            
-            # Procesar el paquete de datos que corresponde al primer paquete de datos
-            self._handle_data_message(rdt_request)
-            #self.send_ack()
-            #self.start_data_wait_timer()
-                
-        except Exception as e:
-            logger.error(f"Error procesando primer paquete de datos de {self.address}: {e}")
-            self._handle_message_error()
+            logger.info(f"Paquete enviado a {self.address} con seq_num {self.seq_num}. Total bytes enviados: {self.bytes_sent}/{self.current_filesize}")
 
-# ================================[MANEJO DE DATOS]===============================
-    def _handle_data_message(self, rdt_request: RdtRequest) -> None:
-        """Maneja mensajes de datos del archivo (upload del cliente)"""
-        try:
-            # Procesar los datos recibidos que corresponden a un paquete de datos ya parte de la transferencia de datos
-            if self.data_handler:
-                response = self.data_handler.handle_data(rdt_request.message.data)
-                self._send_response(response)
-                #self.send_ack()
-                #self.start_data_wait_timer()
-            
-        except Exception as e:
-            logger.error(f"Error procesando paquete de datos: {e}")
+        if packets_sent > 0 and self.retransmission_timer is None:
+            self.start_retransmission_timer()
 
-    def _send_response(self, response: bytes) -> None:
-        """Envía respuesta al cliente"""
-        try:
-            if not response:
-                raise ValueError("Response vacío")
-            
-            host, port = self.address.split(":")
-            # Crear socket temporal para enviar respuesta
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.sendto(response, (host, int(port)))
-            sock.close()
-        except Exception as e:
-            logger.error(f"Error enviando respuesta a {self.address}: {e}")
-            raise  # Re-lanzar para que el método llamador pueda manejarlo
+    def _handle_ack_message(self, rdt_request: RdtRequest) -> None:
+        ack_num = rdt_request.get_ref_num()
+        logger.info(f"ACK recibido de {self.address} con ref_num {ack_num}")
 
-# ================================[MANEJO DE ERRORES]===============================
-    def _handle_handshake_error(self) -> None:
-        """Maneja errores durante el handshake"""
-        logger.error(f"Error en handshake para {self.address}")
-        self.is_active = False
+        # Si estamos en download, continuar enviando ventana
+        if self.current_operation == "DOWNLOAD":
+            if ack_num > self.base_seq:
+                # Quitamos de on fly aquellos paquetes que nos indica el cliente que llegaron
+                self.packets_on_fly = [pkt for pkt in self.packets_on_fly if pkt.message.seq_num >= ack_num]
 
-    def _handle_message_error(self) -> None:
-        """Maneja errores en el procesamiento de mensajes"""
-        logger.warning(f"Error procesando mensaje de {self.address}")
-        # Para errores de mensajes, solo logueamos y continuamos
+                # Actualizamos la base de la ventana
+                self.base_seq = ack_num
 
-    def _handle_connection_error(self) -> None:
-        """Maneja errores críticos de conexión"""
-        logger.error(f"Error crítico en conexión con {self.address}")
-        self.is_active = False
+                # Reiniciamos el contador de reintentos
+                self.retransmission_attempts = 0
 
-    def _reset_handshake_state(self) -> None:
-        """Resetea el estado del handshake para reintento"""
-        self.handshake_ack_sent = False
-        self.waiting_first_data = False
-        self.handshake_completed = False
-        self._stop_data_wait_timer()
+                # Frenamos el timer y si quedan paquetes en vuelo, lo iniciamos otra vez
+                self.stop_retransmission_timer()
+                if len(self.packets_on_fly) > 0:
+                    self.start_retransmission_timer()
 
-# ================================[MANEJO DE TIMERS]===============================
-    def _start_data_wait_timer(self) -> None:
-        """Inicia un timer para detectar timeout esperando el primer paquete de datos"""
-        try:
-            if self.data_wait_timer:
-                self.data_wait_timer.cancel()
-            
-            self.data_wait_timer = threading.Timer(DATA_WAIT_TIMEOUT, self._on_data_wait_timeout)
-            self.data_wait_timer.start()
-        except Exception as e:
-            logger.error(f"Error iniciando timer de espera de datos: {e}")
+                # Enviamos más paquetes si hay espacio en la ventana
+                self._send_window_packages()
+            else:
+                logger.warning(f"ACK duplicado o fuera de orden recibido de {self.address} con ref_num {ack_num}. Ignorando.")
 
-    def _stop_data_wait_timer(self) -> None:
-        """Detiene el timer de espera de datos"""
-        try:
-            if self.data_wait_timer:
-                self.data_wait_timer.cancel()
-                self.data_wait_timer = None
-        except Exception as e:
-            logger.error(f"Error deteniendo timer de espera de datos: {e}")
+        # Si no quedan paquetes en vuelo y no hay más datos por enviar, cerrar conexión
+        if len(self.packets_on_fly) == 0 and len(self.pending_data_chunks) == 0:
+            logger.info(f"Todos los datos enviados y ACKs recibidos para {self.address}. Cerrando conexión.")
+            self.shutdown()
 
-    def _on_data_wait_timeout(self) -> None:
-        """Handle de timeout esperando el primer paquete de datos"""
-        try:
-            if self.waiting_first_data and self.is_active:
-                # Verificar si ya se superó el máximo de intentos
-                if self.data_wait_attempts >= DATA_WAIT_MAX_ATTEMPTS:
-                    logger.error(f"Máximo número de intentos alcanzado esperando datos de {self.address}")
-                    logger.error(f"Descartando conexión con {self.address}")
-                    self.is_active = False
-                    self.shutdown()
-                    return
-                
-                self.data_wait_attempts += 1
-                
-                # Reintentar enviar el ACK
-                logger.warning(f"Timeout esperando primer paquete de datos de {self.address} (intento {self.data_wait_attempts}/{DATA_WAIT_MAX_ATTEMPTS})")
-                self._send_handshake_ack()
-                self._start_data_wait_timer()  # Reiniciar timer
-                
-        except Exception as e:
-            logger.error(f"Error en timeout de espera de datos: {e}")
-            self.is_active = False
+    def start_retransmission_timer(self) -> None:
+        if self.retransmission_timer:
+            self.retransmission_timer.cancel()
+
+        self.retransmission_timer = threading.Timer(RETRANSMISSION_TIMEOUT, self.handle_retransmission_timeout)
+        self.retransmission_timer.start()
+
+    def stop_retransmission_timer(self) -> None:
+        if self.retransmission_timer:
+            self.retransmission_timer.cancel()
+            self.retransmission_timer = None
+
+    def handle_retransmission_timeout(self) -> None:
+        if not self.is_active or self.current_operation != "DOWNLOAD":
+            return
+
+        self.retransmission_attempts += 1
+
+        # Verificar si se supero el maximo de reintentos
+        if self.retransmission_attempts > MAX_RETRANSMISSION_ATTEMPTS:
+            logger.error(f"Máximo de intentos de retransmisión alcanzado para {self.address}. Cerrando conexión.")
+            self.shutdown()
+            return
+
+        logger.warning(f"Timeout de retransmisión para {self.address}.")
+
+        # Retransmitir todos los paquetes en vuelo
+        if len(self.packets_on_fly) > 0:
+            for packet in self.packets_on_fly:
+                self._send_response(packet.message.to_bytes())
+                logger.info(f"Paquete retransmitido a {self.address} con seq_num {packet.message.seq_num}")
+
+            # Reiniciar el timer
+            self.start_retransmission_timer()
+        else:
+            logger.warning(f"No hay paquetes para retransmitir a {self.address}.")
+
+    def _send_ack_response(self, ref_num: int) -> None:
+        ack_response = RdtResponse.new_ack_response(self.max_window, self.seq_num, ref_num)
+        self._send_response(ack_response.message.to_bytes())
+        self.seq_num += 1
+        logger.info(f"ACK enviado a {self.address} con ref_num {ref_num}")
+
+    def _send_data_response(self, data: bytes) -> None:
+        data_response = RdtResponse.new_data_response(self.max_window, self.seq_num, self.ref_num, data)
+        self._send_response(data_response.message.to_bytes())
+        logger.info(f"Data response enviado a {self.address} con seq_num {self.seq_num}")
+        self.seq_num += 1
+
+    def _send_error_response(self, data: bytes) -> None:
+        data_response = RdtResponse.new_data_response(self.max_window, self.seq_num, self.ref_num, b"E_" + data)
+        self._send_response(data_response.message.to_bytes())
+        logger.info(f"Error response enviado a {self.address} con seq_num {self.seq_num}")
+        self.seq_num += 1
+
+    def _send_response(self, data: bytes) -> None:
+        host, port = self.address.split(":")
+        skt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        skt.sendto(data, (host, int(port)))
 
 # ================================[REPOSITORIO ABSTRACTO]===============================
 class RdtConnectionRepository(ABC):
