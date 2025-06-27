@@ -131,7 +131,7 @@ class RdtConnection:
         if command == 'D':
             filename = parts[1]
             self._handle_download_request(filename, rdt_request)
-        if command == 'U':
+        elif command == 'U':
             filename = parts[1]
             filesize = int(parts[2])
             self._handle_upload_request(filename, filesize, rdt_request)
@@ -259,10 +259,10 @@ class RdtConnection:
             else:
                 logger.warning(f"ACK duplicado o fuera de orden recibido de {self.address} con ref_num {ack_num}. Ignorando.")
 
-        # Si no quedan paquetes en vuelo y no hay más datos por enviar, cerrar conexión
-        if len(self.packets_on_fly) == 0 and len(self.pending_data_chunks) == 0:
-            logger.info(f"Todos los datos enviados y ACKs recibidos para {self.address}. Cerrando conexión.")
-            self.shutdown()
+            # Si no quedan paquetes en vuelo y no hay más datos por enviar, cerrar conexión
+            if len(self.packets_on_fly) == 0 and len(self.pending_data_chunks) == 0:
+                logger.info(f"Todos los datos enviados y ACKs recibidos para {self.address}. Cerrando conexión.")
+                self.shutdown()
 
     def _start_retransmission_timer(self) -> None:
         if self.retransmission_timer:
