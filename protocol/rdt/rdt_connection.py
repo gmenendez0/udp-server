@@ -12,19 +12,10 @@ import threading
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ================================[CONSTANTES]===============================
 SERVER_SEQ_NUM_START = 0
 CONNECTION_TIMEOUT = 5.0  # 30 segundos de timeout de conexión
-DATA_WAIT_TIMEOUT = 5    # 5 segundos esperando primer paquete de datos después del handshake
-DATA_WAIT_MAX_ATTEMPTS = 3  # Máximo 3 intentos de reenvío del ACK
+ACK_COUNT_FOR_RETRY = 3  # Máximo 3 intentos de reenvío del ACK
 
-# FLAGS
-FLAG_HANDSHAKE = 0
-FLAG_ACK = 1
-FLAG_DATA = 0  # DATA usa el mismo flag que HANDSHAKE pero con datos
-FLAG_LAST = 2
-
-# ================================[CLASE PRINCIPAL]===============================
 class RdtConnection:
     def __init__(self, address: str):
         self.address: str = address
@@ -86,12 +77,12 @@ class RdtConnection:
 
     def _handle_handshake_message(self, rdt_request: RdtRequest) -> None:
         """Maneja mensajes de handshake"""
-        if rdt_request.message.flag != FLAG_HANDSHAKE:
+        if not rdt_request.is_handshake():
             logger.warning(f"Se esperaba mensaje de handshake (FLAG=0) de {self.address}, se recibió FLAG={rdt_request.message.flag}. Ignorando.")
             self.shutdown()
             return
 
-        if not self._validate_handshake_message(rdt_request):
+        if not rdt_request.is_valid_handshake_message():
             logger.error(f"Request de handshake inválido de {self.address}. Ignorando.")
             self.shutdown()
             return
@@ -104,17 +95,6 @@ class RdtConnection:
 
         self._send_handshake_ack()
         self.connection_established = True
-
-    def _validate_handshake_message(self, rdt_request: RdtRequest) -> bool:
-        if rdt_request.get_max_window() is None or rdt_request.get_max_window() <= 0:
-            logger.error(f"Max window inválido: {rdt_request.get_max_window()}")
-            return False
-
-        if rdt_request.get_seq_num() is None or rdt_request.get_seq_num() < 0:
-            logger.error(f"Seq num inválido: {rdt_request.get_seq_num()}")
-            return False
-
-        return True
 
     def _send_handshake_ack(self) -> None:
         ack_response = RdtResponse.new_ack_response(self.max_window, self.seq_num, self.ref_num)

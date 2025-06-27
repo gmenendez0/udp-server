@@ -1,8 +1,8 @@
-# Tipos de mensaje y flags (consistentes con el servidor)
-# El servidor usa: FLAG_ACK = 1, FLAG_DATA = 0, FLAG_LAST = 2
-FLAG_ACK = 1        # Para ACK
-FLAG_DATA = 0       # Para datos
-FLAG_LAST = 2       # Para último paquete
+# FLAGS
+FLAG_HANDSHAKE = 0
+FLAG_ACK = 1
+FLAG_DATA = 2
+FLAG_LAST = 3
 
 class RdtMessage:
     
@@ -59,19 +59,25 @@ class RdtResponse:
     def new_data_response(cls, max_window: int, seq_num: int, ref_num: int, data: bytes) -> "RdtResponse":
         return cls(flag=FLAG_DATA, max_window=max_window, seq_num=seq_num, ref_num=ref_num, data=data)
 
+    def is_last(self) -> bool:
+        return self.message.flag == FLAG_LAST
+
 class RdtRequest:
     def __init__(self, address: str, request: bytes):
         self.address = address
         self.message = RdtMessage.from_bytes(request)
     
     def is_data(self) -> bool:
-        return self.message.flag == FLAG_DATA and len(self.message.data) > 0
+        return self.message.flag == FLAG_DATA or self.message.flag == FLAG_LAST
     
     def is_ack(self) -> bool:
         return self.message.flag == FLAG_ACK
     
     def is_last(self) -> bool:
         return self.message.flag == FLAG_LAST
+
+    def is_handshake(self) -> bool:
+        return self.message.flag == FLAG_HANDSHAKE
     
     def get_max_window(self) -> int:
         return self.message.max_window
@@ -84,3 +90,14 @@ class RdtRequest:
     
     def get_data(self) -> bytes:
         return self.message.data
+
+    def is_valid_handshake_message(self) -> bool:
+        if self.get_max_window() is None or self.get_max_window() <= 0:
+            print(f"Max window inválido: {self.get_max_window()}")
+            return False
+
+        if self.get_seq_num() is None or self.get_seq_num() < 0:
+            print(f"Seq num inválido: {self.get_seq_num()}")
+            return False
+
+        return True
