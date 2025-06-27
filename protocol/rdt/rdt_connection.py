@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from queue import Queue, Empty
-from server.server_helpers import get_udp_socket
 from .rdt_message import RdtRequest, RdtResponse
 from typing import Optional, Dict
 import time
@@ -34,7 +33,7 @@ class RdtConnection:
         self.max_window: Optional[int] = None
 
         self.request_queue: Queue[bytes] = Queue()
-        self.packets_on_fly: list[RdtRequest] = []
+        self.packets_on_fly: list[RdtResponse] = []
         self.last_activity = time.time()
         self.connection_established: bool = False
         self.is_active = True
@@ -89,12 +88,12 @@ class RdtConnection:
         """Maneja mensajes de handshake"""
         if rdt_request.message.flag != FLAG_HANDSHAKE:
             logger.warning(f"Se esperaba mensaje de handshake (FLAG=0) de {self.address}, se recibió FLAG={rdt_request.message.flag}. Ignorando.")
-            # BUG ACA REVISAR
+            self.shutdown()
             return
 
         if not self._validate_handshake_message(rdt_request):
             logger.error(f"Request de handshake inválido de {self.address}. Ignorando.")
-            # BUG ACA REVISAR
+            self.shutdown()
             return
 
         logger.info(f"Handshake recibido de {self.address} with max_window: {rdt_request.get_max_window()}, seq_num: {rdt_request.get_seq_num()}")
@@ -122,21 +121,6 @@ class RdtConnection:
         self._send_response(ack_response.message.to_bytes())
         logger.info(f"ACK de handshake enviado a {self.address}")
 
-    def _pending_packets(self):
-        return self.packets_on_fly.last().is_last()
-
-    def _get_next_package(self):
-        pass 
-    
-
-    def _send_window_packages(self) -> None:
-        while self.packets_on_fly.count() < self.max_window and self._pending_packets(): #max window = 3 y mandar 5 paqs
-            pass
-            #nuevo pkg = service.getNextPkg()
-            #enviarPkg()
-            #pkg_on_fly++
-            #quedanPaqsPorEnviar = service.QuedanPaqsPorEnviar
-
     def _handle_data_message1(self, rdt_request: RdtRequest) -> None:
         pass
         #1. Mandar ACK
@@ -148,6 +132,20 @@ class RdtConnection:
 
         #2. Procesar rdt req con data handler y obtener rta en bytes
         #3. Si hay una rta para enviar, enviarla
+
+    def _pending_packets(self) -> bool:
+        return self.packets_on_fly[-1].is_last()
+
+    def _get_next_package(self) -> RdtResponse:
+        pass
+
+    def _send_window_packages(self) -> None:
+        while len(self.packets_on_fly) < self.max_window and self._pending_packets():
+            pass
+            # nuevo pkg = service.getNextPkg()
+            # enviarPkg()
+            # pkg_on_fly++
+            # quedanPaqsPorEnviar = service.QuedanPaqsPorEnviar
 
     def _handle_ack_message1(self, rdt_request: RdtRequest) -> None:
         pass
