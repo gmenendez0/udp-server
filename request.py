@@ -4,7 +4,7 @@ class FunctionFlag(Enum):
     NONE = 0
     CLOSE_CONN = 1
 
-class Request:
+class RDTRequest:
     def __init__(self, raw: bytes):
         # Ack flag: "0" o "1"
         self.ack_flag: bool = raw[0:1] == b"1"
@@ -32,3 +32,4 @@ class Request:
 
         # Data (resto después del segundo _)
         self.payload: str = raw[second_us_idx + 1:].decode()
+
