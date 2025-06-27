@@ -3,7 +3,7 @@ from typing import Callable
 from server_helpers import get_udp_socket
 
 class UDPServer:
-    def __init__(self, host: str, port: int, buffer_size: int, handler: Callable[[bytes], bytes]):
+    def __init__(self, host: str, port: int, buffer_size: int, handler: Callable[[tuple, bytes], None]):
         self._host              = host
         self._port              = port
         self._handler           = handler
@@ -26,8 +26,7 @@ class UDPServer:
     def _process_request(self, data: bytes, address: tuple) -> None:
         try:
             print(f"Received {len(data)} bytes from {address}: {data.decode('utf-8', errors='ignore')}")
-            response = self._handler(data)
-            self._skt.sendto(response, address)
+            self._handler(address, data)
         except Exception as e:
             print(f"Error processing request from {address}: {e}")
 
