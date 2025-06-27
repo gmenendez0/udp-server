@@ -225,7 +225,7 @@ class RdtConnection:
             self._send_response(response.message.to_bytes())
 
             self.packets_on_fly.append(response)
-            self.next_seq += 1
+            self.seq_num += 1
             self.bytes_sent += len(chunk)
             packets_sent += 1
 
@@ -324,6 +324,7 @@ class RdtConnection:
         host, port = self.address.split(":")
         skt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         skt.sendto(data, (host, int(port)))
+        skt.close()
 
 # ================================[REPOSITORIO ABSTRACTO]===============================
 class RdtConnectionRepository(ABC):
