@@ -42,7 +42,6 @@ class RdtConnection:
         self.bytes_received             : Optional[int]     = None
         self.pending_data_chunks        : List[bytes]       = []
 
-        self.next_seq                   : Optional[int]     = 0
         self.base_seq                   : Optional[int]     = 0
 
         self.retransmission_timer       : Optional[threading.Timer] = None
