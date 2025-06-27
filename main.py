@@ -1,3 +1,5 @@
+from sys import flags
+
 import udp_server
 
 def echo_upper_handler(data: bytes) -> bytes:
@@ -26,6 +28,10 @@ except KeyboardInterrupt:
 logica de negocio
 
 # 1. Hacer RDTRequest
+- ack flag
+- seqNumber
+- refNumber
+- data: []bytes
 # 2. Hacer DPRequest (data protocol request)
 # 3. DPRequestHandler
 # 4. RDTRequestHandler
