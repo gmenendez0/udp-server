@@ -230,7 +230,7 @@ class RdtConnection:
             logger.info(f"Paquete enviado a {self.address} con seq_num {self.seq_num}. Total bytes enviados: {self.bytes_sent}/{self.current_filesize}")
 
         if packets_sent > 0 and self.retransmission_timer is None:
-            self.start_retransmission_timer()
+            self._start_retransmission_timer()
 
     def _handle_ack_message(self, rdt_request: RdtRequest) -> None:
         ack_num = rdt_request.get_ref_num()
@@ -249,9 +249,9 @@ class RdtConnection:
                 self.retransmission_attempts = 0
 
                 # Frenamos el timer y si quedan paquetes en vuelo, lo iniciamos otra vez
-                self.stop_retransmission_timer()
+                self._stop_retransmission_timer()
                 if len(self.packets_on_fly) > 0:
-                    self.start_retransmission_timer()
+                    self._start_retransmission_timer()
 
                 # Enviamos más paquetes si hay espacio en la ventana
                 self._send_window_packages()
@@ -263,19 +263,19 @@ class RdtConnection:
             logger.info(f"Todos los datos enviados y ACKs recibidos para {self.address}. Cerrando conexión.")
             self.shutdown()
 
-    def start_retransmission_timer(self) -> None:
+    def _start_retransmission_timer(self) -> None:
         if self.retransmission_timer:
             self.retransmission_timer.cancel()
 
-        self.retransmission_timer = threading.Timer(RETRANSMISSION_TIMEOUT, self.handle_retransmission_timeout)
+        self.retransmission_timer = threading.Timer(RETRANSMISSION_TIMEOUT, self._handle_retransmission_timeout)
         self.retransmission_timer.start()
 
-    def stop_retransmission_timer(self) -> None:
+    def _stop_retransmission_timer(self) -> None:
         if self.retransmission_timer:
             self.retransmission_timer.cancel()
             self.retransmission_timer = None
 
-    def handle_retransmission_timeout(self) -> None:
+    def _handle_retransmission_timeout(self) -> None:
         if not self.is_active or self.current_operation != "DOWNLOAD":
             return
 
@@ -296,7 +296,7 @@ class RdtConnection:
                 logger.info(f"Paquete retransmitido a {self.address} con seq_num {packet.message.seq_num}")
 
             # Reiniciar el timer
-            self.start_retransmission_timer()
+            self._start_retransmission_timer()
         else:
             logger.warning(f"No hay paquetes para retransmitir a {self.address}.")
 
