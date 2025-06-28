@@ -23,6 +23,7 @@ MAX_RETRANSMISSION_ATTEMPTS = 5     # Máximo de intentos de retransmisión
 CHUNK_SIZE = 1024                   # Leer archivo en chunks de 1KB
 UPLOAD_COMMAND = 'U'
 DOWNLOAD_COMMAND = 'D'
+FAST_RETRANSMIT_THRESHOLD = 3       # Número de ACKs duplicados para activar fast retransmit
 
 class RdtConnection:
     def __init__(self, address: str):
@@ -48,6 +49,9 @@ class RdtConnection:
 
         self.retransmission_timer       : Optional[threading.Timer] = None
         self.retransmission_attempts    : int = 0
+
+        self.duplicate_ack_count        : int = 0
+        self.last_ack_num               : Optional[int] = None
 
     def add_request(self, data: bytes) -> None:
         self.request_queue.put(data)
@@ -250,6 +254,8 @@ class RdtConnection:
 
                 # Reiniciamos el contador de reintentos
                 self.retransmission_attempts = 0
+                self.duplicate_ack_count = 0
+                self.last_ack_num = ack_num
 
                 # Frenamos el timer y si quedan paquetes en vuelo, lo iniciamos otra vez
                 self._stop_retransmission_timer()
@@ -258,13 +264,42 @@ class RdtConnection:
 
                 # Enviamos más paquetes si hay espacio en la ventana
                 self._send_window_packages()
+            elif ack_num == self.base_seq and ack_num == self.last_ack_num:
+                # ACK duplicado
+                self.duplicate_ack_count += 1
+                logger.warning(f"ACK duplicado recibido de {self.address} con ref_num {ack_num}. Contador de duplicados: {self.duplicate_ack_count}")
+
+                if self.duplicate_ack_count >= FAST_RETRANSMIT_THRESHOLD:
+                    self._fast_retransmitit()
             else:
-                logger.warning(f"ACK duplicado o fuera de orden recibido de {self.address} con ref_num {ack_num}. Ignorando.")
+                logger.warning(f"ACK duplicado o fuera de orden recibido de {self.address} con ref_num {ack_num}.")
+                if ack_num == self.last_ack_num:
+                    self.duplicate_ack_count = 1
+                    self.last_ack_num = ack_num
+
 
             # Si no quedan paquetes en vuelo y no hay más datos por enviar, cerrar conexión
             if len(self.packets_on_fly) == 0 and len(self.pending_data_chunks) == 0:
                 logger.info(f"Todos los datos enviados y ACKs recibidos para {self.address}. Cerrando conexión.")
                 self.shutdown()
+
+    def _fast_retransmitit(self) -> None:
+        logger.info(f"Fast retransmit activado para {self.address}.")
+
+        # Reiniciar contador de ACKs duplicados
+        self.duplicate_ack_count = 0
+
+        # Retransmitir todos los paquetes en vuelo
+        for packet in self.packets_on_fly:
+            self._send_response(packet.message.to_bytes())
+            logger.info(f"Paquete retransmitido a {self.address} con seq_num {packet.message.seq_num}")
+
+        # Frenar el timer
+        self._stop_retransmission_timer()
+
+        # Si quedan paquetes en vuelo, reiniciar el timer
+        if len(self.packets_on_fly) > 0:
+            self._start_retransmission_timer()
 
     def _start_retransmission_timer(self) -> None:
         if self.retransmission_timer:
