@@ -265,9 +265,9 @@ class RdtConnection:
                 # Enviamos más paquetes si hay espacio en la ventana
                 self._send_window_packages()
             elif ack_num == self.base_seq and ack_num == self.last_ack_num:
+                self.duplicate_ack_count += 1
                 logger.warning(f"ACK duplicado (>1) recibido de {self.address} con ref_num {ack_num}. Contador de duplicados: {self.duplicate_ack_count}")
 
-                self.duplicate_ack_count += 1
                 if self.duplicate_ack_count >= FAST_RETRANSMIT_THRESHOLD:
                     self._fast_retransmit()
             elif ack_num == self.base_seq:
