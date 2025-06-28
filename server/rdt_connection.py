@@ -312,6 +312,12 @@ class RdtConnection:
             if len(self.packets_on_fly) == 0 and len(self.pending_data_chunks) == 0:
                 logger.info(f"Todos los datos enviados y ACKs recibidos para {self.address}. Cerrando conexión.")
                 self.shutdown()
+        # Si estamos en el upload, solamente se deberia recibir un ack de parte del cliente correspondiente al paq "D_OK"
+        elif self.current_operation == "UPLOAD":
+            # Quitamos de on fly el paquete "D_OK" y matamos su timer
+            self.packets_on_fly.clear()
+            self._stop_retransmission_timer()
+            logger.info(f"ACK de subida recibido de {self.address}. Esperando datos del cliente.")
 
     def _fast_retransmit(self) -> None:
         logger.info(f"Fast retransmit activado para {self.address}.")
