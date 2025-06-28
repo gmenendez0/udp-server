@@ -21,6 +21,8 @@ MAX_FILE_SIZE = 5_500_000           # 5.5MB
 RETRANSMISSION_TIMEOUT = 2.0        # Segundos para el timeout de retransmisión
 MAX_RETRANSMISSION_ATTEMPTS = 5     # Máximo de intentos de retransmisión
 CHUNK_SIZE = 1024                   # Leer archivo en chunks de 1KB
+UPLOAD_COMMAND = 'U'
+DOWNLOAD_COMMAND = 'D'
 
 class RdtConnection:
     def __init__(self, address: str):
@@ -128,10 +130,10 @@ class RdtConnection:
         parts = data.split()
         command = parts[0]
 
-        if command == 'D':
+        if command == DOWNLOAD_COMMAND:
             filename = parts[1]
             self._handle_download_request(filename, rdt_request)
-        elif command == 'U':
+        elif command == UPLOAD_COMMAND:
             filename = parts[1]
             filesize = int(parts[2])
             self._handle_upload_request(filename, filesize, rdt_request)
@@ -144,17 +146,17 @@ class RdtConnection:
         self._send_ack_response(rdt_request.get_seq_num() + 1)
 
         filepath = os.path.join(STORAGE_PATH, filename)
-        filesize = get_file_size_in_bytes(filepath)
+        file_already_exists = get_file_size_in_bytes(filepath) is None
+
+        if file_already_exists:
+            logger.error(f"Archivo {filename} ya existe para {self.address}")
+            self._send_error_response(b'FILE_ALREADY_EXISTS')
+            self.shutdown()
+            return
 
         if filesize > MAX_FILE_SIZE:
             logger.error(f"Archivo {filename} demasiado grande ({filesize}) para {self.address}")
             self._send_error_response(b'FILE_TOO_LARGE')
-            self.shutdown()
-            return
-
-        if os.path.isfile(filepath):
-            logger.error(f"Archivo {filename} ya existe para {self.address}")
-            self._send_error_response(b'FILE_ALREADY_EXISTS')
             self.shutdown()
             return
 
