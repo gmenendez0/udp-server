@@ -265,17 +265,17 @@ class RdtConnection:
                 # Enviamos más paquetes si hay espacio en la ventana
                 self._send_window_packages()
             elif ack_num == self.base_seq and ack_num == self.last_ack_num:
-                # ACK duplicado
-                self.duplicate_ack_count += 1
-                logger.warning(f"ACK duplicado recibido de {self.address} con ref_num {ack_num}. Contador de duplicados: {self.duplicate_ack_count}")
+                logger.warning(f"ACK duplicado (>1) recibido de {self.address} con ref_num {ack_num}. Contador de duplicados: {self.duplicate_ack_count}")
 
+                self.duplicate_ack_count += 1
                 if self.duplicate_ack_count >= FAST_RETRANSMIT_THRESHOLD:
-                    self._fast_retransmitit()
+                    self._fast_retransmit()
+            elif ack_num == self.base_seq:
+                logger.warning(f"Primer ACK duplicado recibido de {self.address} con ref_num {ack_num}.")
+                self.duplicate_ack_count = 1
+                self.last_ack_num = ack_num
             else:
-                logger.warning(f"ACK duplicado o fuera de orden recibido de {self.address} con ref_num {ack_num}.")
-                if ack_num == self.last_ack_num:
-                    self.duplicate_ack_count = 1
-                    self.last_ack_num = ack_num
+                logger.warning(f"ACK fuera de orden recibido de {self.address} con ref_num {ack_num}. Ignorando")
 
 
             # Si no quedan paquetes en vuelo y no hay más datos por enviar, cerrar conexión
@@ -283,7 +283,7 @@ class RdtConnection:
                 logger.info(f"Todos los datos enviados y ACKs recibidos para {self.address}. Cerrando conexión.")
                 self.shutdown()
 
-    def _fast_retransmitit(self) -> None:
+    def _fast_retransmit(self) -> None:
         logger.info(f"Fast retransmit activado para {self.address}.")
 
         # Reiniciar contador de ACKs duplicados
