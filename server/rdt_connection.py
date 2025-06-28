@@ -201,8 +201,14 @@ class RdtConnection:
     def _handle_download_request(self, filename: str, rdt_request: RdtRequest) -> None:
         logger.info(f"Solicitud de descarga de {self.address} para el archivo {filename}")
 
+        # ? server.refNum = 1
+        # ? server.seqNum = 0
+
         # Enviar ACK del request
         self._send_ack_response(rdt_request.get_seq_num() + 1)
+
+        # ? server.refNum = 2
+        # ? server.seqNum = 1
 
         # Verificar que el archivo exista
         filepath = os.path.join(STORAGE_PATH, filename)
@@ -270,7 +276,7 @@ class RdtConnection:
         ack_num = rdt_request.get_ref_num()
         logger.info(f"ACK recibido de {self.address} con ref_num {ack_num}")
 
-        # Si estamos en download, continuar enviando ventana
+        # Si estamos en download
         if self.current_operation == "DOWNLOAD":
             # Si me estan ackeando un paquete el cual no es el base de la ventana:
             if ack_num > self.base_seq:
@@ -292,18 +298,20 @@ class RdtConnection:
 
                 # Enviamos más paquetes si hay espacio en la ventana
                 self._send_window_packages()
-            # Si me estan ackeando el base de la ventana y es el mismo que el ultimo ack recibido:
-            elif ack_num == self.base_seq and ack_num == self.last_ack_num:
-                self.duplicate_ack_count += 1
-                logger.warning(f"ACK duplicado (>1) recibido de {self.address} con ref_num {ack_num}. Contador de duplicados: {self.duplicate_ack_count}")
-
-                if self.duplicate_ack_count >= FAST_RETRANSMIT_THRESHOLD:
-                    self._fast_retransmit()
-            # Si solo me estan ackeando el base de la ventana:
+            # Si me estan ackeando el paquete base de la ventana:
             elif ack_num == self.base_seq:
-                logger.warning(f"Primer ACK duplicado recibido de {self.address} con ref_num {ack_num}.")
-                self.duplicate_ack_count = 1
-                self.last_ack_num = ack_num
+                # Si last_ack_num es igual al ack_num, es un ACK duplicado
+                if self.last_ack_num == ack_num:
+                    self.duplicate_ack_count += 1
+                    logger.warning(f"ACK Duplicado recibido de {self.address} con ref_num {ack_num}. Contador de duplicados: {self.duplicate_ack_count}")
+
+                    if self.duplicate_ack_count >= FAST_RETRANSMIT_THRESHOLD:
+                        self._fast_retransmit()
+                # Si no, es el primer ACK duplicado que recibimos
+                else:
+                    logger.warning(f"Primer ACK duplicado recibido de {self.address} con ref_num {ack_num}.")
+                    self.duplicate_ack_count = 1
+                    self.last_ack_num = ack_num
             # Si no:
             else:
                 logger.warning(f"ACK fuera de orden recibido de {self.address} con ref_num {ack_num}. Ignorando")
