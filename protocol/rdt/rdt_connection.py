@@ -146,7 +146,7 @@ class RdtConnection:
         self._send_ack_response(rdt_request.get_seq_num() + 1)
 
         filepath = os.path.join(STORAGE_PATH, filename)
-        file_already_exists = get_file_size_in_bytes(filepath) is None
+        file_already_exists = get_file_size_in_bytes(filepath) is not None
 
         if file_already_exists:
             logger.error(f"Archivo {filename} ya existe para {self.address}")
