@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from queue import Queue, Empty
 
 from server.file_helpers import get_file_size_in_bytes, get_file_in_chunks, append_bytes_to_file
-from .rdt_message import RdtRequest, RdtResponse
+from protocol.rdt.rdt_message import RdtRequest, RdtResponse
 from typing import Optional, Dict, List
 import time
 import logging
