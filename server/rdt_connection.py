@@ -171,17 +171,22 @@ class RdtConnection:
         logger.info(f"Preparado para recibir archivo {filename} de tamaño {filesize} de {self.address}")
 
     def _handle_upload_data(self, rdt_request: RdtRequest) -> None:
+        # Obtener la data del archivo
         data = rdt_request.get_data()
         file_data = data[2:]  # Sacar el prefijo "D_"
 
+        # Appendear los bytes al archivo
         filepath = os.path.join(STORAGE_PATH, self.current_filename)
         append_bytes_to_file(filepath, file_data)
 
+        # Actualizar el contador de bytes recibidos
         self.bytes_received += len(file_data)
         logger.info(f"Recibidos {self.bytes_received}/{self.current_filesize} bytes de {self.address} para el archivo {self.current_filename}")
 
+        # Enviar ACK
         self._send_ack_response(rdt_request.get_seq_num() + 1)
 
+        # Verificar si la transferencia está completa. En caso que si, cerrar la conexion
         if rdt_request.is_last() or self.bytes_received >= self.current_filesize:
             logger.info(f"Archivo {self.current_filename} recibido completamente de {self.address}")
             self.shutdown()
@@ -260,6 +265,7 @@ class RdtConnection:
 
         # Si estamos en download, continuar enviando ventana
         if self.current_operation == "DOWNLOAD":
+            # Si me estan ackeando un paquete el cual no es el base de la ventana:
             if ack_num > self.base_seq:
                 # Quitamos de on fly aquellos paquetes que nos indica el cliente que llegaron
                 self.packets_on_fly = [pkt for pkt in self.packets_on_fly if pkt.message.seq_num >= ack_num]
@@ -279,19 +285,21 @@ class RdtConnection:
 
                 # Enviamos más paquetes si hay espacio en la ventana
                 self._send_window_packages()
+            # Si me estan ackeando el base de la ventana y es el mismo que el ultimo ack recibido:
             elif ack_num == self.base_seq and ack_num == self.last_ack_num:
                 self.duplicate_ack_count += 1
                 logger.warning(f"ACK duplicado (>1) recibido de {self.address} con ref_num {ack_num}. Contador de duplicados: {self.duplicate_ack_count}")
 
                 if self.duplicate_ack_count >= FAST_RETRANSMIT_THRESHOLD:
                     self._fast_retransmit()
+            # Si solo me estan ackeando el base de la ventana:
             elif ack_num == self.base_seq:
                 logger.warning(f"Primer ACK duplicado recibido de {self.address} con ref_num {ack_num}.")
                 self.duplicate_ack_count = 1
                 self.last_ack_num = ack_num
+            # Si no:
             else:
                 logger.warning(f"ACK fuera de orden recibido de {self.address} con ref_num {ack_num}. Ignorando")
-
 
             # Si no quedan paquetes en vuelo y no hay más datos por enviar, cerrar conexión
             if len(self.packets_on_fly) == 0 and len(self.pending_data_chunks) == 0:
