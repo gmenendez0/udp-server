@@ -122,10 +122,13 @@ class RdtConnection:
         logger.info(f"ACK de handshake enviado a {self.address}")
 
     def _handle_data_message(self, rdt_request: RdtRequest) -> None:
-        data = rdt_request.get_data().decode('utf-8')
-        #logger.info(f"Datos recibidos de {self.address}: {data}")
         logger.info(f"Datos recibidos de {self.address} con seq_num {rdt_request.get_seq_num()}")
+
+        if self.current_operation == "UPLOAD":
+            self._handle_upload_data(rdt_request)
+
         # Determinar operacion a ejecutar
+        data = rdt_request.get_data().decode('utf-8')
         parts = data.split()
 
         if parts[0] == DOWNLOAD_COMMAND:
@@ -135,8 +138,6 @@ class RdtConnection:
             filename = parts[1]
             filesize = int(parts[2])
             self._handle_upload_request(filename, filesize, rdt_request)
-        elif self.current_operation == "UPLOAD":
-            self._handle_upload_data(rdt_request)
 
     def _handle_upload_request(self, filename: str, filesize: int, rdt_request: RdtRequest) -> None:
         logger.info(f"Solicitud de subida de {self.address} para el archivo {filename} de tamaño {filesize}")
@@ -180,14 +181,13 @@ class RdtConnection:
     def _handle_upload_data(self, rdt_request: RdtRequest) -> None:
         # Obtener la data del archivo
         data = rdt_request.get_data()
-        file_data = data[2:]  # Sacar el prefijo "D_"
         
         # Appendear los bytes al archivo
         filepath = os.path.join(STORAGE_PATH, self.current_filename)
-        append_bytes_to_file(filepath, file_data)
+        append_bytes_to_file(filepath, data)
 
         # Actualizar el contador de bytes recibidos
-        self.bytes_received += len(file_data)
+        self.bytes_received += len(data)
         logger.info(f"Recibidos {self.bytes_received}/{self.current_filesize} bytes de {self.address} para el archivo {self.current_filename}")
 
         # Enviar ACK
@@ -201,14 +201,8 @@ class RdtConnection:
     def _handle_download_request(self, filename: str, rdt_request: RdtRequest) -> None:
         logger.info(f"Solicitud de descarga de {self.address} para el archivo {filename}")
 
-        # ? server.refNum = 1
-        # ? server.seqNum = 0
-
         # Enviar ACK del request
         self._send_ack_response(rdt_request.get_seq_num() + 1)
-
-        # ? server.refNum = 2
-        # ? server.seqNum = 1
 
         # Verificar que el archivo exista
         filepath = os.path.join(STORAGE_PATH, filename)
