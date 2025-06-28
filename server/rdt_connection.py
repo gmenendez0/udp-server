@@ -102,11 +102,6 @@ class RdtConnection:
 
     def _handle_handshake_message(self, rdt_request: RdtRequest) -> None:
         """Maneja mensajes de handshake"""
-        if not rdt_request.is_handshake():
-            logger.warning(f"Se esperaba mensaje de handshake (FLAG=0) de {self.address}, se recibió FLAG={rdt_request.message.flag}. Ignorando.")
-            self.shutdown()
-            return
-
         if not rdt_request.is_valid_handshake_message():
             logger.error(f"Request de handshake inválido de {self.address}. Ignorando.")
             self.shutdown()
