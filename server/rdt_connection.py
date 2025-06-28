@@ -166,8 +166,15 @@ class RdtConnection:
         self.current_filesize = filesize
         self.bytes_received = 0
 
-        # Enviamos OK para que el cliente empiece a enviar datos
-        self._send_data_response(b"D_OK") #TODO: ACA HAY UN BUG. SI ESTO SE PIERDE; NADIE LO REINTENTA.
+        # Creamos la respuesta de ok y la enviamos
+        ok_res = RdtResponse.new_data_response(self.max_window, self.seq_num, self.ref_num, b"D_OK")
+        self._send_response(ok_res.message.to_bytes())
+
+        # Enviada la respuesta de ok, actualizamos el seq_num y marcamos el paquete como en vuelo y prendemos el timer de retransmision
+        self.seq_num += 1
+        self.packets_on_fly.append(ok_res)
+        self._start_retransmission_timer()
+
         logger.info(f"Preparado para recibir archivo {filename} de tamaño {filesize} de {self.address}")
 
     def _handle_upload_data(self, rdt_request: RdtRequest) -> None:
@@ -337,7 +344,7 @@ class RdtConnection:
             self.retransmission_timer = None
 
     def _handle_retransmission_timeout(self) -> None:
-        if not self.is_active or self.current_operation != "DOWNLOAD":
+        if not self.is_active:
             return
 
         self.retransmission_attempts += 1
