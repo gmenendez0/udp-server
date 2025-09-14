@@ -1,4 +1,4 @@
-import udp_server
+from . import udp_server
 import asyncio
 import argparse
 
@@ -7,7 +7,7 @@ def echo_upper_handler(data: bytes) -> bytes:
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(prog="udp_server", description="UDP server")
+    parser = argparse.ArgumentParser(prog="start-server", description="File transfer UDP server")
 
     verbosity = parser.add_mutually_exclusive_group()
     verbosity.add_argument("-v", "--verbose", action="store_true",
@@ -19,6 +19,8 @@ def parse_args():
                         help="service IP address")
     parser.add_argument("-p", "--port", type=int, default=9999,
                         help="service port")
+    parser.add_argument("-s", "--storage", default="./storage",
+                        help="storage directory path")
 
     return parser.parse_args()
 

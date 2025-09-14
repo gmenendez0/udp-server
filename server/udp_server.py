@@ -1,6 +1,6 @@
 import asyncio
 from typing import Callable
-from server_helpers import get_udp_socket
+from .server_helpers import get_udp_socket
 
 class AsyncUDPServer:
     def __init__(self, host: str, port: int, buffer_size: int, handler: Callable[[bytes], bytes]):

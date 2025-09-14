@@ -1,4 +1,4 @@
-import udp_server
+from . import udp_server
 import asyncio
 
 def echo_upper_handler(data: bytes) -> bytes:
