@@ -1,6 +1,6 @@
 import threading
 from typing import Callable
-from server_helpers import get_udp_socket
+from .server_helpers import get_udp_socket
 
 class UDPServer:
     def __init__(self, host: str, port: int, buffer_size: int, handler: Callable[[bytes], bytes]):
