@@ -36,10 +36,10 @@ def main():
     else:
         print(f"Servidor escuchando en {args.host}:{args.port}")
 
-    server = udp_server.AsyncUDPServer(host=args.host, port=args.port, buffer_size=1024, handler=echo_upper_handler)
+    server = udp_server.UDPServer(host=args.host, port=args.port, buffer_size=1024, handler=echo_upper_handler)
 
     try:
-        asyncio.run(server.serve())
+        server.serve()
     except KeyboardInterrupt:
         print("Server stopped by user.")
 
