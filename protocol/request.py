@@ -32,3 +32,32 @@ class RDTRequest:
 
         # Data (resto después del segundo _)
         self.payload: str = raw[second_us_idx + 1:].decode()
+
+
+
+
+"""
+# ? LO QUE VIMOS AYER
+{ack flag}{function flag}{sequence number}|{reference number}_{uuid}_{data}
+
+1. Manejar acks, entrega garantiza, entrega en orden, evitar duplicados,
+
+# ? UDP
+
+# ? RDT
+{ack flag}{sequence number}|{reference number}_{data [X, HTTP]}
+1. Manejar acks, entrega garantiza, entrega en orden, evitar duplicados
+
+# ? Protocolo de datos X
+{function flag}_{uuid}_payload
+logica de negocio
+
+# 1. Hacer RDTRequest
+- ack flag
+- seqNumber
+- refNumber
+- data: []bytes
+# 2. Hacer DPRequest (data protocol request)
+# 3. DPRequestHandler
+# 4. RDTRequestHandler
+"""
