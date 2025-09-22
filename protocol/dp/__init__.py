@@ -5,6 +5,9 @@ class FunctionFlag(Enum):
     CLOSE_CONN = 1
 
 class DPRequest:
+    """
+    {function flag}_{uuid}_payload
+    """
     def __init__(self, raw: bytes):
         # Separadores
         first_us_idx = raw.index(b"_")

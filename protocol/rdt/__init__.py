@@ -5,7 +5,10 @@ class FunctionFlag(Enum):
     CLOSE_CONN = 1
 
 class RDTRequest:
-     def __init__(self, raw: bytes):
+    """
+    {ack flag}{sequence number}|{reference number}_{data [X, HTTP]}
+    """
+    def __init__(self, raw: bytes):
         # Ack flag: "0" o "1"
         self.ack_flag: bool = raw[0:1] == b"1"
 
@@ -19,8 +22,8 @@ class RDTRequest:
         # Reference number (entre "|" y "_")
         self.reference_number: int = int(raw[pipe_idx + 1:us_idx])
 
-        # Payload: lo que queda después del "_"
-        self.payload: bytes = raw[us_idx + 1:]
+        # data: lo que queda después del "_"
+        self.data: bytes = raw[us_idx + 1:]
 
 
 
