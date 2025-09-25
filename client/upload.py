@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Cliente UDP para operación UPLOAD - 
+Cliente UDP para operación UPLOAD.
 Transfiere un archivo del cliente hacia el servidor
 """
 
 import argparse
-import socket
 import os
 import sys
+import re
 from pathlib import Path
+from client.stop_and_wait import handle_upload
 
 
 def parse_args():
@@ -39,7 +40,6 @@ def parse_args():
 
     return parser.parse_args()
 
-
 def validate_file(filepath: str) -> Path:
     """Valida que el archivo existe y es accesible"""
     file_path = Path(filepath)
@@ -61,14 +61,30 @@ def validate_file(filepath: str) -> Path:
     
     return file_path
 
+def validate_filename(filename: str, source_file: Path) -> str:
+    """
+    Valida que `filename` sea un nombre válido de archivo (sin caracteres
+    inválidos y no vacío).
+    Si no lo es, devuelve el nombre del archivo original `source_file`.
+    """
+    if not filename:
+        return source_file.name
+
+    # No permite caracteres: / \ : * ? " < > | y no debe estar vacío
+    invalid_chars = r'[\/\\:\*\?"<>\|]'
+    if re.search(invalid_chars, filename) or filename.strip() == "":
+        print(f"[WARNING] Nombre inválido '{filename}'. Usando '{source_file.name}' en su lugar.")
+        return source_file.name
+
+    return filename
+
 
 def upload_file(args):
     """Implementa la lógica de upload del archivo"""
     try:
         source_file = validate_file(args.src)
-        
-        target_name = args.name if args.name else source_file.name
-        
+        target_name = validate_filename(args.name, source_file)
+                
         if args.verbose:
             print(f"[VERBOSE] Iniciando upload de {source_file}")
             print(f"[VERBOSE] Servidor: {args.host}:{args.port}")
@@ -78,17 +94,15 @@ def upload_file(args):
         elif not args.quiet:
             print(f"Subiendo {source_file.name} a {args.host}:{args.port}")
 
-        # TODO: Implementar protocolo UDP RDT
-        pass
+        return handle_upload(source_file, args.host, args.port, target_name, args.protocol)
+        
     except Exception as e:
         print(f"Error al subir el archivo: {e}")
         return False
-    return True
 
 def main():
     """Función principal del cliente upload"""
     args = parse_args()
-    
     success = upload_file(args)
     sys.exit(0 if success else 1)
 
