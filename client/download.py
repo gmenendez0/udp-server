@@ -92,8 +92,7 @@ def download_file(args):
 
 def main():
     """Función principal del cliente download"""
-    args = parse_args()
-    
+    args = parse_args() 
     success = download_file(args)
     sys.exit(0 if success else 1)
 

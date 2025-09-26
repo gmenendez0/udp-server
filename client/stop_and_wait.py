@@ -15,7 +15,7 @@ from pathlib import Path
 from protocol.dp.dp_request import DPRequest
 from protocol.rdt.rdt_request import RDTRequest
 from protocol import FunctionFlag
-from client.udp_client import SocketInterface
+from client.udp_client import UDPClient
 
 CHUNK_SIZE = 1024  # Tamaño máximo por chunk (bytes)
 ACK_TIMEOUT = 2     # Timeout en segundos para recibir ACK
@@ -94,7 +94,7 @@ def handle_upload(path: Path, host: str, port: int, filename: str) -> bool:
         return False
 
     state = StopAndWaitState()
-    socket_interface = SocketInterface(host, port)
+    socket_interface = UDPClient(host, port)
 
     try:
         total_size = path.stat().st_size
@@ -153,8 +153,60 @@ def handle_upload(path: Path, host: str, port: int, filename: str) -> bool:
         socket_interface.close()
         return False
 
-def handle_download():
-    """
-    download
-    """
-    pass
+def handle_download(path: Path,host: str, port: int, filename: str) -> bool:
+    
+    state = StopAndWaitState()
+    socket_interface = UDPClient(host, port)
+    socket_interface.socket.settimeout(ACK_TIMEOUT)
+    uuid = str(uuid_lib.uuid4())  # UUID único para identificar esta transferencia
+
+
+    try: #primero solicitamos la descarga al server
+
+        print(f"[INFO] Solicitando descarga de {filename}...")
+
+        seq = state.next_sequence()
+        dp_request = DPRequest.from_user_input(FunctionFlag.NONE,uuid,filename.encode())
+        rdt_request_bytes = RDTRequest.from_dp_request(dp_request, seq,0).serialize()
+        socket_interface.send(rdt_request_bytes)
+
+        print(f"[INFO] Esperando respuesta del servidor a la solicitud (seq = {seq})...")
+
+        expected_seq_num = 0 # la secuencia de datos empieza en 0
+
+        with open(path, "wb") as file:
+            while True:
+                data, _,_ = socket_interface.receive() #le pido un chunk de datos al servidor
+            
+                if not data:
+                    print(f"[WARNING] Timeout esperando datos del servidor {seq}")
+                    continue #siguiente iteracion del while hasta conseguir datos o cerrar conexion
+                
+                # se recibio data
+                try:
+                    #TODO: parsear data recibida
+                    pass  # Agrega lógica de parseo aquí
+
+                except Exception as e:
+                    print(f"[ERROR] Se recibio un paquete corrupto: {e}")
+                    print("Descartando paquete...")
+                    continue #sigueinte iteracion para conseguir un paquete valido
+
+                """
+                Ya se parseo la data, ahora hay 3 casos posibles:
+                - El paquete es el esperado (si es asi chequeo si es el ultimo)
+                - El paquete es un duplicado
+                - El paquete esta fuera de orden
+                """
+
+                # caso 1
+
+                # caso 2
+
+                # caso 3
+            pass
+
+    except Exception as e:
+        print(f"[ERROR] Download falló: {e}")
+        socket_interface.close()
+        return False    
