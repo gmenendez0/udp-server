@@ -1,4 +1,5 @@
 from enum import Enum
+from ..dp.dp_request import DPRequest
 
 class FunctionFlag(Enum):
     NONE = 0
@@ -27,8 +28,23 @@ class RDTRequest:
         # data: lo que queda después del "_"
         self.data = raw[us_idx + 1:]
 
+    @classmethod
+    def from_dp_request(cls, dp: DPRequest, seq: int, ref: int, ack: bool = False):
+        """
+        Construye un RDTRequest a partir de un DPRequest.
+        """
+        data = dp.serialize()
+        ack_flag = "1" if ack else "0"
+        raw = f"{ack_flag}{seq}|{ref}_".encode() + data
+        return cls(raw)
 
-
+    def serialize(self) -> bytes:
+        """
+        Devuelve el formato final en bytes para enviar por UDP.
+        """
+        ack_flag = b"1" if self.ack_flag else b"0"
+        header = f"{ack_flag.decode()}{self.sequence_number}|{self.referencenumber}_".encode()
+        return header + self.data
 
 """
 # ? LO QUE VIMOS AYER

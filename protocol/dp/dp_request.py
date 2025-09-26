@@ -25,3 +25,17 @@ class DPRequest:
 
         # Payload
         self.payload: bytes = raw[second_us_idx + 1:]
+
+    @classmethod
+    def from_user_input(cls, function_flag, uuid: str, payload: str):
+        """
+        Construye un DPRequest a partir de datos "lógicos" (lado cliente).
+        """
+        raw = f"{function_flag.value}{uuid}_{payload}".encode()
+        return cls(raw)
+
+    def serialize(self) -> bytes:
+        """
+        Devuelve el formato en bytes para enviar por red.
+        """
+        return f"{self.function_flag.value}{self.uuid}_{self.payload.decode()}".encode()
