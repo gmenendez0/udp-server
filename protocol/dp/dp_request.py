@@ -4,6 +4,8 @@ class FunctionFlag(Enum):
     NONE = 0
     CLOSE_CONN = 1
 
+# Obsoleto pero se me ocurre que podriamos generar una dp_control y una dp_data
+# y que el handler decida que hacer con cada una
 class DPRequest:
     """
     {function flag}_{uuid}_payload
