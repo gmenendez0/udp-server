@@ -19,6 +19,10 @@ class RDTRequest:
 
     """
     def __init__(self, header: dict):
+        """
+        Constructor que recibe un diccionario con los campos del header.
+        El diccionario debe tener las claves: type, flags, wnd, seq, sid, len, payload
+        """
         self.type = header["type"]
         self.flags = header["flags"]
         self.wnd = header["wnd"]
@@ -31,7 +35,7 @@ class RDTRequest:
         """
         Devuelve el formato final en bytes para enviar por UDP.
         """
-        return pack_header(self.type, self.flags, self.wnd, self.seq, self.sid, self.len, self.payload)
+        return pack_header(self.type, self.flags, self.wnd, self.seq, self.sid, self.payload)
 
     @classmethod
     def from_dp_request(cls, dp: DPRequest, seq: int, ref: int, ack: bool = False):
@@ -40,28 +44,10 @@ class RDTRequest:
         """
         pass
 
-"""
-# ? LO QUE VIMOS AYER
-{ack flag}{function flag}{sequence number}|{reference number}_{uuid}_{data}
-
-1. Manejar acks, entrega garantiza, entrega en orden, evitar duplicados,
-
-# ? UDP
-
-# ? RDT
-{ack flag}{sequence number}|{reference number}_{data [X, HTTP]}
-1. Manejar acks, entrega garantiza, entrega en orden, evitar duplicados
-
-# ? Protocolo de datos X
-{function flag}_{uuid}_payload
-logica de negocio
-
-# 1. Hacer RDTRequest
-- ack flag
-- seqNumber
-- refNumber
-- data: []bytes
-# 2. Hacer DPRequest (data protocol request)
-# 3. DPRequestHandler
-# 4. RDTRequestHandler
-"""
+    @classmethod
+    def from_bytes(cls, data: bytes):
+        """
+        Crea un RDTRequest a partir de bytes usando unpack_header.
+        """
+        header = unpack_header(data)
+        return cls(header)
