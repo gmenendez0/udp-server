@@ -1,10 +1,25 @@
 from . import udp_server
-import asyncio
 import argparse
+from protocol.rdt.rdt_server_handler import create_rdt_server_handler
 
-def echo_upper_handler(data: bytes) -> bytes:
-    return b"Echo: " + data.upper()
+def server_handler(data: bytes) -> bytes:
+    """Handler principal que delega al RDT handler"""
+    # Por ahora, usar una dirección simulada
+    # 
+    address = ("127.0.0.1", 12345)
 
+    # Delegar al RDT handler
+    rdt_handler = create_rdt_server_handler()
+
+    print(f"[RDT] Recibido paquete de {address}: {data}")
+
+    response = rdt_handler.handle_datagram(address, data)
+    
+    if response:
+        return response
+    else:
+        # Si no hay respuesta del RDT handler, devolver echo como fallback
+        return b"Echo: " + data.upper()
 
 def parse_args():
     parser = argparse.ArgumentParser(prog="start-server", description="File transfer UDP server")
@@ -24,8 +39,6 @@ def parse_args():
 
     return parser.parse_args()
 
-
-
 def main():
     args = parse_args()
 
@@ -36,13 +49,12 @@ def main():
     else:
         print(f"Servidor escuchando en {args.host}:{args.port}")
 
-    server = udp_server.UDPServer(host=args.host, port=args.port, buffer_size=1024, handler=echo_upper_handler)
+    server = udp_server.UDPServer(host=args.host, port=args.port, buffer_size=1024, handler=server_handler)
 
     try:
         server.serve()
     except KeyboardInterrupt:
         print("Server stopped by user.")
-
 
 if __name__ == "__main__":
     main()
