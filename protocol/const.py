@@ -1,11 +1,13 @@
 # proto_min.py — header sin VERSION ni CRC, sin ACKNO
 import struct
+import time
 
 # ==== Constantes ====
 T_DATA, T_ACK, T_CTRL = 0x00, 0x01, 0x02
 F_LAST, F_ERR = 0x01, 0x02
 
 OP_REQUEST_UPLOAD, OP_UPLOAD_ACCEPTED = 0x01, 0x02
+OP_DOWNLOAD_ACCEPTED = 0x04
 OP_REQUEST_DOWNLOAD, OP_END_SESSION, OP_ERROR = 0x03, 0x10, 0x7F
 
 
@@ -98,3 +100,7 @@ def build_request_upload(filename: str, size_bytes: int, proto: int, window_req:
     if chunk_size is not None: tlvs.append(tlv_u16(TLV_CHUNK_SIZE, chunk_size))
     return make_ctrl_packet(OP_REQUEST_UPLOAD, tlvs, sid=0)
 
+
+def generate_new_sid():
+    """Genera un nuevo SID (simplemente un timestamp por simplicidad)"""
+    return int(time.time() * 1000) & 0xFFFFFFFF  # 32 bits
