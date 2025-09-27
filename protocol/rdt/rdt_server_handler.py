@@ -1,188 +1,144 @@
-#!/usr/bin/env python3
 """
-RDT Server Handler - Se encarga solo del protocolo RDT (confiabilidad).
-Delega la lógica de datos al DP Handler.
+Manejador simplificado de paquetes RDT.
+Solo maneja la llegada, procesamiento y envío para creación de conexiones.
+Devuelve RDTRequest con tipo REQUEST_ACCEPTED.
 """
 
-from abc import ABC, abstractmethod
-import time
-from threading import Lock
-from enum import Enum
+from typing import Optional, Tuple
+from ..const import unpack_header, T_CTRL
+from .rdt_request import RDTRequest
+from .connection_manager import ConnectionManager
+from .processors import ControlRequestProcessor
+from ..data_flow import DataFlowProcessor
 
-from protocol.dp.dp_control_request import DPControlRequest
-from protocol.rdt.rdt_request import RDTRequest
-from ..const import unpack_header, ctrl_parse, T_CTRL, T_DATA, T_ACK, OP_REQUEST_UPLOAD, OP_REQUEST_DOWNLOAD, make_ack_packet, generate_new_sid
-from ..dp.dp_request import DPRequest
-
-# Automatic Repeat reQuest Protocols
-class ARQProtocol(Enum):
-    STOP_AND_WAIT = 1
-    GO_BACK_N = 2
-
-class RdtConnection:
-    def __init__(self, seq_num: int, ref_num: int, arq_protocol: ARQProtocol):
-        self.seq_num        = seq_num
-        self.ref_num        = ref_num
-        self.sid            = generate_new_sid()  # Session ID, asignado al crear la conexión
-        self.arqProtocol    = arq_protocol
-        self.buffer         = bytearray()
-        self.expected_seq   = 0  # Número de secuencia esperado para el siguiente paquete
-        self.pending_packets = {}  # Diccionario para almacenar paquetes fuera de orden
-        self.expected_length = None  # Longitud total esperada del mensaje (opcional)
-        self.last_activity = time.time()  # Para timeout de conexión
-
-class RdtConnectionRepository(ABC):
-    @abstractmethod
-    def get_connection(self, address: tuple) -> RdtConnection | None:
-        pass
-
-    @abstractmethod
-    def remove_connection(self, address: tuple) -> None:
-        pass
-
-class MemoryRdtConnectionRepository(RdtConnectionRepository):
-    def __init__(self):
-        self.connections = {}
-
-    def get_connection(self, address: tuple) -> RdtConnection | None:
-        return self.connections.get(address, None)
-
-    def remove_connection(self, address: tuple) -> None:
-        if address in self.connections:
-            del self.connections[address]
-
-
+# TODO: Manejo de errores, y que tmb el getters 
+# TODO: data handler ( bytes -> manager -> response Bytes)
 
 class RdtServerHandler:
-    def __init__(self, connection_timeout: int = 5):
-        self.connections = {}
-        self.connections_lock = Lock()
-        self.connection_timeout = connection_timeout
-        self.socket = None  
-
-
-    def set_socket(self, socket):
-        """Asigna el socket para enviar respuestas"""
-        self.socket = socket
+    """
+    Maneja únicamente el procesamiento de paquetes de control para creación de conexiones.
+    Flujo: llegada → procesamiento → envío de RDTRequest con REQUEST_ACCEPTED.
+    """
     
-    def handle_datagram(self, address: tuple, data: bytes) -> bytes:
+    def __init__(self):
+        self.connection_manager = ConnectionManager()
+        self.control_processor = ControlRequestProcessor()
+        self.data_flow_processor = DataFlowProcessor()
+    
+    def handle_datagram(self, address: Tuple[str, int], data: bytes) -> Optional[bytes]:
         """
         Maneja un datagrama recibido.
-        Retorna la respuesta a enviar al cliente.
+        Solo procesa paquetes de control para creación de conexiones.
+        Devuelve RDTRequest serializada con tipo REQUEST_ACCEPTED.
+
+
+
+        response = data_handler(data)
+        send_response(response)
         """
         print(f"[RDT] Procesando datagrama de {address}, tamaño: {len(data)} bytes")
         
+        # 1. PARSEAR PAQUETE RDT
+        rdt_request = self._parse_rdt_packet(address, data)
+        if rdt_request is None:
+            return None
+
+        # 2. SOLO PROCESAR PAQUETES DE CONTROL -> POR AHORA, LA IDEA ES METER ACA PARTE DE LA LOGICA DE DATAFLOW
+        if rdt_request.type != T_CTRL:
+            print(f"[RDT] Ignorando paquete no de control: tipo {rdt_request.type}")
+            return None
+
+        # 3. PROCESAR CONTROL PARA CREACIÓN DE CONEXIÓN
+        return self._handle_control_for_connection(address, rdt_request)
+
+    def _parse_rdt_packet(self, address: Tuple[str, int], data: bytes) -> Optional[RDTRequest]:
+        """Parsea un paquete RDT y retorna RDTRequest o None si hay error"""
         try:
-            # Parsear el paquete RDT recibido
             header = unpack_header(data)
             rdt_request = RDTRequest(header)
             print(f"[RDT] Paquete parseado - Tipo: {header['type']}, Seq: {header['seq']}, SID: {header['sid']}")
+            return rdt_request
         except Exception as e:
             print(f"[RDT] Error al parsear paquete de {address}: {e}")
             return None
 
-        with self.connections_lock:
-            # 1. Check if connection exists for address
-            connection = self.connections.get(address, None)
+    def _handle_control_for_connection(self, address: Tuple[str, int], rdt_request: RDTRequest) -> Optional[bytes]:
+        """
+        Maneja paquetes de control para creación de conexiones.
+        Flujo: parsear control → crear conexión → procesar request → enviar REQUEST_ACCEPTED
+        """
+        try:
+            # 1. Parsear payload de control
+            opcode, tlvs = self.control_processor.parse_control_payload(rdt_request.payload)
+            print(f"[RDT] Control parseado - Opcode: {opcode}")
             
-            # 2. Si no existe conexión, verificar si es una request de control válida
-            if connection is None:
-                if rdt_request.type == T_CTRL:
-                    # Parsear el payload de control
-                    try:
-                        opcode, tlvs = ctrl_parse(rdt_request.payload)
-
-                        if opcode in [OP_REQUEST_UPLOAD, OP_REQUEST_DOWNLOAD]:
-                            print(f"[RDT] Creando nueva conexión para {opcode} desde {address} para upload/download")
-                            connection = self._create_new_connection(address, rdt_request.sid)
-
-                            # Manejar la request de control y obtener ACK
-                            dp_request = self._create_dp_request_from_control(opcode, tlvs, connection.sid)
-                            print(f"[RDT] Creando DP request desde control: Opcode {dp_request.opcode}, TLVs {dp_request.tlvs}, SID {dp_request.sid}")
-                            # Aquí se debería llamar al DP handler para procesar la request
-                            # Por simplicidad, asumimos que siempre se acepta la request
-
-                            # Generar y retornar ACK de control - CORREGIDO
-                            ack_packet = make_ack_packet(
-                                sid=connection.sid,
-                                ackno=rdt_request.seq  # ACK del número de secuencia recibido
-                            )
-                            print(f"[RDT] Enviando ACK de control para SID {connection.sid}, Seq {rdt_request.seq}")
-                            return ack_packet
-                        else:
-                            print(f"[RDT] Opcode de control no reconocido: {opcode}")
-                            return None
-                    except Exception as e:
-                        print(f"[RDT] Error al parsear control: {e}")
-                        return None
-                else:
-                    print(f"[RDT] Paquete sin conexión establecida: {rdt_request.type}")
-                    return None
-            else:
-                # Actualizar actividad de la conexión
-                connection.last_activity = time.time()
-                print(f"[RDT] Usando conexión existente para {address}")
-
-            # 3. Process data according to ARQ protocol
-            if rdt_request.type == T_DATA:
-                return self._handle_data_packet(connection, rdt_request)
-            elif rdt_request.type == T_ACK:
-                return self._handle_ack_packet(connection, rdt_request)
-            else:
-                print(f"[RDT] Tipo de paquete no soportado: {rdt_request.type}")
+            # 2. Validar que es un opcode válido para creación de conexión
+            if not self.control_processor.is_valid_control_opcode(opcode):
+                print(f"[RDT] Opcode no válido para creación de conexión: {opcode}")
                 return None
-
-    def _create_dp_request_from_control(self, opcode: int, tlvs: list, sid: int) -> DPControlRequest:
-        """Crea un DP request desde un mensaje de control"""
-        # Extraer información de los TLVs
-        filename = None
-        for tlv_type, tlv_value in tlvs:
-            if tlv_type == 0x01:  # TLV_FILENAME
-                filename = tlv_value.decode('utf-8')
-                break
-        
-        # Crear payload para DP
-        if opcode == OP_REQUEST_UPLOAD:
-            payload = f"upload_{filename}".encode()
-        elif opcode == OP_REQUEST_DOWNLOAD:
-            payload = filename.encode() if filename else b"download"
-        else:
-            payload = b"unknown"
-        
-        # Crear DP request
-        dp_request = DPControlRequest(opcode, tlvs, sid)
-        
-        return dp_request
-
-    def _handle_ack_packet(self, connection: RdtConnection, header: dict) -> bytes:
-        """Maneja paquetes ACK (no debería recibirse en servidor)"""
-        print(f"[RDT] Servidor recibió ACK inesperado de sesión {connection.sid}")
-        return None
-
-    def _create_new_connection(self, address: tuple, sid: int) -> RdtConnection:
-        """Crea una nueva conexión RDT"""
-        connection = RdtConnection(
-            seq_num=0, 
-            ref_num=sid,  # Usar el SID como ref_num
-            arq_protocol=ARQProtocol.STOP_AND_WAIT
-        )
-        self.connections[address] = connection
-        return connection
-
-    def cleanup_expired_connections(self):
-        """Limpia conexiones expiradas"""
-        current_time = time.time()
-        with self.connections_lock:
-            expired_addresses = []
-            for address, connection in self.connections.items():
-                if current_time - connection.last_activity > self.connection_timeout:
-                    expired_addresses.append(address)
             
-            for address in expired_addresses:
-                del self.connections[address]
-                print(f"[RDT] Conexión expirada removida: {address}")
+            # 3. Crear nueva conexión
+            print(f"[RDT] Creando nueva conexión para {opcode} desde {address}")
+            connection = self.connection_manager.create_connection(address, rdt_request.sid)
+            
+            # 4. Procesar request de control
+            dp_request, accepted_opcode = self.control_processor.process_control_request(opcode, tlvs, connection.sid)
+
+            # No esta la verificaicon de la data, solo acepta el request de control
+            
+            # 5. Crear RDTRequest de respuesta con REQUEST_ACCEPTED
+            response_rdt = self._create_request_accepted_response(connection.sid, rdt_request.seq, accepted_opcode)
+            
+            # 6. Serializar y enviar respuesta
+            response_bytes = response_rdt.serialize() + response_rdt.payload
+            print(f"[RDT] Enviando REQUEST_ACCEPTED para SID {connection.sid}, Seq {rdt_request.seq}, Opcode {accepted_opcode}")
+            
+            return response_bytes
+            
+        except Exception as e:
+            print(f"[RDT] Error al procesar control para conexión: {e}")
+            return None
+
+    def _create_request_accepted_response(self, sid: int, ack_seq: int, accepted_opcode: int) -> RDTRequest:
+        """Crea una RDTRequest de respuesta con tipo REQUEST_ACCEPTED"""
+        # Crear payload de control con el opcode de accepted
+        from ..const import ctrl_build
+        control_payload = ctrl_build(accepted_opcode, [])
+        
+        # Crear header para la respuesta
+        response_header = {
+            'type': T_CTRL,  # Tipo control
+            'flags': 0,      # Sin flags especiales
+            'wnd': 0,        # Ventana por defecto
+            'seq': ack_seq,  # ACK del número de secuencia recibido
+            'sid': sid,      # SID de la conexión creada
+            'len': len(control_payload),
+            'payload': control_payload
+        }
+        
+        return RDTRequest(response_header)
 
 
-def create_rdt_server_handler(connection_timeout: int = 5):
-    """Factory function para crear el RDT server handler"""
-    return RdtServerHandler(connection_timeout)
+    # Métodos delegados al ConnectionManager
+    def cleanup_old_connections(self):
+        """Limpia conexiones inactivas"""
+        self.connection_manager.cleanup_old_connections()
+
+    def get_connection_count(self) -> int:
+        """Retorna el número de conexiones activas"""
+        return self.connection_manager.get_connection_count()
+    
+    def get_connection_manager(self) -> ConnectionManager:
+        """Retorna el ConnectionManager para acceso directo si es necesario"""
+        return self.connection_manager
+
+    # Métodos delegados al ControlRequestProcessor
+    
+    def get_control_processor(self) -> ControlRequestProcessor:
+        """Retorna el ControlRequestProcessor para acceso directo si es necesario"""
+        return self.control_processor
+    
+    # Métodos delegados al DataFlowProcessor
+    def get_data_flow_processor(self) -> DataFlowProcessor:
+        """Retorna el DataFlowProcessor para acceso directo si es necesario"""
+        return self.data_flow_processor

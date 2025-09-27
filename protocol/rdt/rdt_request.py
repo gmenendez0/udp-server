@@ -18,6 +18,22 @@ class RDTRequest:
     17      LEN   PAYLOAD Bytes de datos o control
 
     """
+
+
+    """
+    Solu con guido
+    Offset  Size  Campo   Descripción
+    0       1     TYPE    0x00=DATA | 0x01=ACK
+    2       1     WND     0=Stop&Wait | N=Go-Back-N (N es el tamaño de la ventana)
+    3       4     SEQ     DATA: número de secuencia; ACK: next_expected (ack acumulativo)
+    15      2     LEN     Longitud del payload en bytes (0..65535) — 0 si es CTRL
+    17      LEN   PAYLOAD Bytes de datos o control
+
+    """
+    # TODO: Manejo mas sencillo de los parametros, y que tmb el getters 
+    # TODO: Manejo de errores, y que tmb el getters 
+    # TODO: Mas seguro y tipado posible , por errores de tipo
+    # TODO: RDTMessage 
     def __init__(self, header: dict):
         """
         Constructor que recibe un diccionario con los campos del header.
@@ -35,7 +51,7 @@ class RDTRequest:
         """
         Devuelve el formato final en bytes para enviar por UDP.
         """
-        return pack_header(self.type, self.flags, self.wnd, self.seq, self.sid, self.payload)
+        return pack_header(self.type, self.flags, self.wnd, self.seq, self.sid, self.len, self.payload)
 
     @classmethod
     def from_dp_request(cls, dp: DPRequest, seq: int, ref: int, ack: bool = False):
