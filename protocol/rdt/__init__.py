@@ -1,3 +1,3 @@
-from .rdt_request import RDTRequest, FunctionFlag  # {ack}{seq}|{ref}_{data [X, HTTP]}
+from .rdt_request import RDTRequest  # {ack}{seq}|{ref}_{data [X, HTTP]}
 
-__all__ = ["RDTRequest", "FunctionFlag"]    
+__all__ = ["RDTRequest"]    
