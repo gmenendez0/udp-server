@@ -1,7 +1,7 @@
 import threading
 from typing import Callable
 
-from server_helpers import get_udp_socket
+from .server_helpers import get_udp_socket
 from protocol.rdt.rdt_connection import RdtConnectionRepository, RdtConnection
 
 class RDTServer:
@@ -25,17 +25,20 @@ class RDTServer:
 
                 connection = self._conn_repo.get_connection(str_address)
                 if connection:
-                    connection.request_queue.put(data)
+                    connection.add_request(data)
+                    print(f"[RDT] Petición añadida a conexión existente {str_address}")
                 else:
                     connection = RdtConnection(address=str_address)
-                    connection.request_queue.put(data)
+                    connection.add_request(data)
                     self._conn_repo.add_connection(str_address, connection)
-                    thread = threading.Thread(target=connection.handle_connection, args=(), daemon=True)
-                    thread.start()
+                    print(f"[RDT] Nueva conexión creada para {str_address}")
         finally:
             self._shutdown()
 
     def _shutdown(self) -> None:
+        for address, connection in self._conn_repo.connections.items():
+            connection.shutdown()
+        
         if self._skt:
             self._skt.close()
 

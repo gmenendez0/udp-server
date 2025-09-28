@@ -1,25 +1,17 @@
-from . import udp_server
+from . import rdt_server
 import argparse
-from protocol.rdt.rdt_server_handler import create_rdt_server_handler
+from protocol.rdt.rdt_server_handler import RdtServerHandler
+from protocol.rdt.rdt_connection import MemoryRdtConnectionRepository
 
-def server_handler(data: bytes) -> bytes:
+def server_handler(address, data: bytes) -> None:
     """Handler principal que delega al RDT handler"""
-    # Por ahora, usar una dirección simulada
-    # 
-    address = ("127.0.0.1", 12345)
-
-    # Delegar al RDT handler
-    rdt_handler = create_rdt_server_handler()
-
-    print(f"[RDT] Recibido paquete de {address}: {data}")
-
-    response = rdt_handler.handle_datagram(address, data)
+    # Crear el handler RDT
+    rdt_handler = RdtServerHandler()
     
-    if response:
-        return response
-    else:
-        # Si no hay respuesta del RDT handler, devolver echo como fallback
-        return b"Echo: " + data.upper()
+    print(f"[RDT] Recibido paquete de {address}: {len(data)} bytes")
+    
+    # Delegar al RDT handler
+    rdt_handler.handle_datagram(address, data)
 
 def parse_args():
     parser = argparse.ArgumentParser(prog="start-server", description="File transfer UDP server")
@@ -49,7 +41,17 @@ def main():
     else:
         print(f"Servidor escuchando en {args.host}:{args.port}")
 
-    server = udp_server.UDPServer(host=args.host, port=args.port, buffer_size=1024, handler=server_handler)
+    # Crear repositorio de conexiones
+    conn_repo = MemoryRdtConnectionRepository()
+    
+    # Crear servidor RDT
+    server = rdt_server.RDTServer(
+        host=args.host, 
+        port=args.port, 
+        buffer_size=1024, 
+        handler=server_handler,
+        conn_repo=conn_repo
+    )
 
     try:
         server.serve()
