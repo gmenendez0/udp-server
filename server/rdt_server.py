@@ -1,17 +1,15 @@
 import threading
-from typing import Callable
-
+from typing import Callable, Optional
 from .server_helpers import get_udp_socket
 from protocol.rdt.rdt_connection import RdtConnectionRepository, RdtConnection
 
 class RDTServer:
-    def __init__(self, host: str, port: int, buffer_size: int, handler: Callable[[tuple, bytes], None], conn_repo: RdtConnectionRepository):
-        self._host              = host
-        self._port              = port
-        self._handler           = handler
-        self._recv_buffer_size  = buffer_size
-        self._skt               = None
-        self._conn_repo         = conn_repo
+    def __init__(self, host: str, port: int, buffer_size: int, conn_repo: RdtConnectionRepository = None):
+        self._host = host
+        self._port = port
+        self._recv_buffer_size = buffer_size
+        self._skt = None
+        self._conn_repo = conn_repo
 
     def serve(self) -> None:
         self._skt = get_udp_socket(self._host, self._port)

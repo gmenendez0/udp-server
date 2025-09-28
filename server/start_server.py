@@ -1,17 +1,6 @@
 from . import rdt_server
 import argparse
-from protocol.rdt.rdt_server_handler import RdtServerHandler
 from protocol.rdt.rdt_connection import MemoryRdtConnectionRepository
-
-def server_handler(address, data: bytes) -> None:
-    """Handler principal que delega al RDT handler"""
-    # Crear el handler RDT
-    rdt_handler = RdtServerHandler()
-    
-    print(f"[RDT] Recibido paquete de {address}: {len(data)} bytes")
-    
-    # Delegar al RDT handler
-    rdt_handler.handle_datagram(address, data)
 
 def parse_args():
     parser = argparse.ArgumentParser(prog="start-server", description="File transfer UDP server")
@@ -44,12 +33,11 @@ def main():
     # Crear repositorio de conexiones
     conn_repo = MemoryRdtConnectionRepository()
     
-    # Crear servidor RDT
+    # Crear servidor RDT directamente
     server = rdt_server.RDTServer(
         host=args.host, 
         port=args.port, 
         buffer_size=1024, 
-        handler=server_handler,
         conn_repo=conn_repo
     )
 
