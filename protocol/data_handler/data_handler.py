@@ -9,7 +9,7 @@ class DataHandler:
         self.connection_packets = {}
         self.connection_lock = {}
     
-    def handle_data(self, data: bytes, context: Dict[str, Any] = None) -> bytes:
+    def handle_data(self, data: bytes) -> bytes:
         logger.info(f"Recibido paquete de datos: {data}")
         return data
         
