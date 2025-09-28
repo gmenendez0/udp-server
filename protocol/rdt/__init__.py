@@ -1,3 +1,3 @@
-from .rdt_request import RDTRequest  # {ack}{seq}|{ref}_{data [X, HTTP]}
+from .rdt_message import RdtRequest
 
-__all__ = ["RDTRequest"]    
+__all__ = ["RdtRequest"]
