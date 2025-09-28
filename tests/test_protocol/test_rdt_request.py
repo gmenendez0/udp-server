@@ -1,126 +1,124 @@
 import unittest
-from protocol.rdt import RDTRequest
-from protocol.const import T_DATA, T_ACK, T_CTRL, F_LAST, F_ERR
+from protocol.rdt import RdtRequest
+from protocol.rdt.rdt_message import RdtMessage
 
 class TestRDTRequest(unittest.TestCase):
     def test_rdt_request_data_packet(self):
-        """Test que RDTRequest funciona con un paquete de datos"""
-        header = {
-            'type': T_DATA,
-            'flags': F_LAST,
-            'wnd': 0,
-            'seq': 42,
-            'sid': 12345,
-            'len': 5,
-            'payload': b'hello'
-        }
-        rdt = RDTRequest(header)
+        """Test que RdtRequest funciona con un paquete de datos"""
+        # Crear un RdtMessage con flag=0 (DATA)
+        rdt_message = RdtMessage(flag=0, max_window=1, seq_num=42, ref_num=12345, data=b'hello')
+        request_bytes = rdt_message.to_bytes()
         
-        self.assertEqual(rdt.type, T_DATA)
-        self.assertEqual(rdt.flags, F_LAST)
-        self.assertEqual(rdt.wnd, 0)
-        self.assertEqual(rdt.seq, 42)
-        self.assertEqual(rdt.sid, 12345)
-        self.assertEqual(rdt.len, 5)
-        self.assertEqual(rdt.payload, b'hello')
+        rdt_request = RdtRequest(address="127.0.0.1:8080", session_id=12345, request=request_bytes)
+        
+        self.assertFalse(rdt_request.is_ack())
+        self.assertFalse(rdt_request.is_last())
+        self.assertEqual(rdt_request.get_max_window(), 1)
+        self.assertEqual(rdt_request.get_seq_num(), 42)
+        self.assertEqual(rdt_request.get_ref_num(), 12345)
+        self.assertEqual(rdt_request.get_data(), b'hello')
 
     def test_rdt_request_ack_packet(self):
-        """Test que RDTRequest funciona con un paquete ACK"""
-        header = {
-            'type': T_ACK,
-            'flags': 0,
-            'wnd': 0,
-            'seq': 43,
-            'sid': 12345,
-            'len': 0,
-            'payload': b''
-        }
-        rdt = RDTRequest(header)
+        """Test que RdtRequest funciona con un paquete ACK"""
+        # Crear un RdtMessage con flag=1 (ACK)
+        rdt_message = RdtMessage(flag=1, max_window=1, seq_num=43, ref_num=12345, data=b'')
+        request_bytes = rdt_message.to_bytes()
         
-        self.assertEqual(rdt.type, T_ACK)
-        self.assertEqual(rdt.flags, 0)
-        self.assertEqual(rdt.seq, 43)
-        self.assertEqual(rdt.sid, 12345)
-        self.assertEqual(rdt.len, 0)
-        self.assertEqual(rdt.payload, b'')
+        rdt_request = RdtRequest(address="127.0.0.1:8080", session_id=12345, request=request_bytes)
+        
+        self.assertTrue(rdt_request.is_ack())
+        self.assertFalse(rdt_request.is_last())
+        self.assertEqual(rdt_request.get_max_window(), 1)
+        self.assertEqual(rdt_request.get_seq_num(), 43)
+        self.assertEqual(rdt_request.get_ref_num(), 12345)
+        self.assertEqual(rdt_request.get_data(), b'')
 
-    def test_rdt_request_control_packet(self):
-        """Test que RDTRequest funciona con un paquete de control"""
-        control_payload = b'\x01\x01\x04test'  # OP_REQUEST_UPLOAD + TLV filename
-        header = {
-            'type': T_CTRL,
-            'flags': 0,
-            'wnd': 0,
-            'seq': 0,
-            'sid': 0,
-            'len': len(control_payload),
-            'payload': control_payload
-        }
-        rdt = RDTRequest(header)
+    def test_rdt_request_last_packet(self):
+        """Test que RdtRequest funciona con un paquete LAST"""
+        # Crear un RdtMessage con flag=2 (LAST)
+        rdt_message = RdtMessage(flag=2, max_window=1, seq_num=44, ref_num=12345, data=b'final')
+        request_bytes = rdt_message.to_bytes()
         
-        self.assertEqual(rdt.type, T_CTRL)
-        self.assertEqual(rdt.flags, 0)
-        self.assertEqual(rdt.seq, 0)
-        self.assertEqual(rdt.sid, 0)
-        self.assertEqual(rdt.len, len(control_payload))
-        self.assertEqual(rdt.payload, control_payload)
-
-    def test_rdt_request_from_bytes(self):
-        """Test que RDTRequest.from_bytes funciona correctamente"""
-        # Crear un paquete de datos usando pack_header
-        from protocol.const import pack_header
-        payload = b'hello'
-        packet = pack_header(T_DATA, F_LAST, 0, 42, 12345, payload) + payload
+        rdt_request = RdtRequest(address="127.0.0.1:8080", session_id=12345, request=request_bytes)
         
-        rdt = RDTRequest.from_bytes(packet)
-        
-        self.assertEqual(rdt.type, T_DATA)
-        self.assertEqual(rdt.flags, F_LAST)
-        self.assertEqual(rdt.seq, 42)
-        self.assertEqual(rdt.sid, 12345)
-        self.assertEqual(rdt.payload, payload)
-
-    def test_rdt_request_serialize(self):
-        """Test que serialize funciona correctamente"""
-        header = {
-            'type': T_DATA,
-            'flags': F_LAST,
-            'wnd': 0,
-            'seq': 42,
-            'sid': 12345,
-            'len': 5,
-            'payload': b'hello'
-        }
-        rdt = RDTRequest(header)
-        serialized = rdt.serialize()
-        
-        # Verificar que se puede deserializar correctamente
-        rdt2 = RDTRequest.from_bytes(serialized + rdt.payload)
-        self.assertEqual(rdt.type, rdt2.type)
-        self.assertEqual(rdt.flags, rdt2.flags)
-        self.assertEqual(rdt.seq, rdt2.seq)
-        self.assertEqual(rdt.sid, rdt2.sid)
-        self.assertEqual(rdt.payload, rdt2.payload)
-
-    def test_rdt_request_invalid_header(self):
-        """Test que RDTRequest falla con header inválido"""
-        with self.assertRaises(KeyError):
-            RDTRequest({'type': T_DATA})  # Faltan campos requeridos
+        self.assertFalse(rdt_request.is_ack())
+        self.assertTrue(rdt_request.is_last())
+        self.assertEqual(rdt_request.get_max_window(), 1)
+        self.assertEqual(rdt_request.get_seq_num(), 44)
+        self.assertEqual(rdt_request.get_ref_num(), 12345)
+        self.assertEqual(rdt_request.get_data(), b'final')
 
     def test_rdt_request_go_back_n_window(self):
-        """Test que RDTRequest funciona con ventana Go-Back-N"""
-        header = {
-            'type': T_DATA,
-            'flags': 0,
-            'wnd': 5,  # Ventana de tamaño 5
-            'seq': 10,
-            'sid': 54321,
-            'len': 3,
-            'payload': b'abc'
-        }
-        rdt = RDTRequest(header)
+        """Test que RdtRequest funciona con ventana Go-Back-N"""
+        # Crear un RdtMessage con max_window > 1 (Go-Back-N)
+        rdt_message = RdtMessage(flag=0, max_window=5, seq_num=10, ref_num=54321, data=b'abc')
+        request_bytes = rdt_message.to_bytes()
         
-        self.assertEqual(rdt.wnd, 5)
-        self.assertEqual(rdt.seq, 10)
-        self.assertEqual(rdt.sid, 54321)
-        self.assertEqual(rdt.payload, b'abc')
+        rdt_request = RdtRequest(address="127.0.0.1:8080", session_id=54321, request=request_bytes)
+        
+        self.assertEqual(rdt_request.get_max_window(), 5)
+        self.assertEqual(rdt_request.get_seq_num(), 10)
+        self.assertEqual(rdt_request.get_ref_num(), 54321)
+        self.assertEqual(rdt_request.get_data(), b'abc')
+
+    def test_rdt_request_stop_and_wait(self):
+        """Test que RdtRequest funciona con Stop-and-Wait (max_window=1)"""
+        # Crear un RdtMessage con max_window=1 (Stop-and-Wait)
+        rdt_message = RdtMessage(flag=0, max_window=1, seq_num=1, ref_num=100, data=b'test')
+        request_bytes = rdt_message.to_bytes()
+        
+        rdt_request = RdtRequest(address="127.0.0.1:8080", session_id=100, request=request_bytes)
+        
+        self.assertEqual(rdt_request.get_max_window(), 1)
+        self.assertEqual(rdt_request.get_seq_num(), 1)
+        self.assertEqual(rdt_request.get_ref_num(), 100)
+        self.assertEqual(rdt_request.get_data(), b'test')
+
+    def test_rdt_request_from_bytes_integration(self):
+        """Test que RdtRequest funciona correctamente con bytes reales"""
+        # Crear un RdtMessage y convertirlo a bytes
+        original_message = RdtMessage(flag=0, max_window=3, seq_num=100, ref_num=200, data=b'hello world')
+        request_bytes = original_message.to_bytes()
+        
+        # Crear RdtRequest desde los bytes
+        rdt_request = RdtRequest(address="127.0.0.1:8080", session_id=200, request=request_bytes)
+        
+        # Verificar que los datos se extraen correctamente
+        self.assertEqual(rdt_request.get_max_window(), 3)
+        self.assertEqual(rdt_request.get_seq_num(), 100)
+        self.assertEqual(rdt_request.get_ref_num(), 200)
+        self.assertEqual(rdt_request.get_data(), b'hello world')
+
+    def test_rdt_request_empty_data(self):
+        """Test que RdtRequest funciona con datos vacíos"""
+        rdt_message = RdtMessage(flag=1, max_window=1, seq_num=0, ref_num=0, data=b'')
+        request_bytes = rdt_message.to_bytes()
+        
+        rdt_request = RdtRequest(address="127.0.0.1:8080", session_id=0, request=request_bytes)
+        
+        self.assertTrue(rdt_request.is_ack())
+        self.assertEqual(rdt_request.get_data(), b'')
+
+    def test_rdt_request_large_data(self):
+        """Test que RdtRequest funciona con datos grandes"""
+        large_data = b'x' * 1000  # 1000 bytes
+        rdt_message = RdtMessage(flag=0, max_window=10, seq_num=999, ref_num=888, data=large_data)
+        request_bytes = rdt_message.to_bytes()
+        
+        rdt_request = RdtRequest(address="127.0.0.1:8080", session_id=888, request=request_bytes)
+        
+        self.assertEqual(rdt_request.get_data(), large_data)
+        self.assertEqual(len(rdt_request.get_data()), 1000)
+
+    def test_rdt_request_address_and_session(self):
+        """Test que RdtRequest mantiene correctamente address y session_id"""
+        rdt_message = RdtMessage(flag=0, max_window=1, seq_num=1, ref_num=1, data=b'test')
+        request_bytes = rdt_message.to_bytes()
+        
+        rdt_request = RdtRequest(address="192.168.1.100:9000", session_id=99999, request=request_bytes)
+        
+        self.assertEqual(rdt_request.address, "192.168.1.100:9000")
+        # Nota: session_id no está expuesto en la nueva interfaz, pero se pasa al constructor
+
+if __name__ == '__main__':
+    unittest.main()
