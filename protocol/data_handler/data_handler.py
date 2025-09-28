@@ -1,6 +1,8 @@
 from typing import Dict, Any
+import logging
 
-from protocol.rdt.rdt_connection import logger
+# Configurar logger local para evitar importación circular
+logger = logging.getLogger(__name__)
 
 class DataHandler:
     def __init__(self):
@@ -13,3 +15,4 @@ class DataHandler:
         logger.info(f"Recibido paquete de datos: {data}")
         return data
         
+
