@@ -1,41 +1,56 @@
 """
 Manejador simplificado de paquetes RDT.
-Solo maneja la llegada, procesamiento y envío para creación de conexiones.
-Devuelve RDTRequest con tipo REQUEST_ACCEPTED.
+Maneja la llegada, procesamiento y distribución de paquetes a conexiones.
 """
 
 import threading
 from typing import Optional, Tuple
 from ..const import unpack_header
-from .rdt_connection import RdtConnection, RdtConnectionRepository
-
-
-# TODO: Manejo de errores, y que tmb el getters 
-# TODO: data handler ( bytes -> manager -> response Bytes)
+from .rdt_connection import RdtConnection, MemoryRdtConnectionRepository
 
 class RdtServerHandler:
     """
-    Maneja únicamente el procesamiento de paquetes de control para creación de conexiones.
-    Flujo: llegada → procesamiento → envío de RDTRequest con REQUEST_ACCEPTED.
+    Maneja el procesamiento de paquetes RDT y los distribuye a las conexiones apropiadas.
+    Flujo: llegada → conexión → operación específica → respuesta.
     """
     
     def __init__(self):
-        self.connection_manager = RdtConnectionRepository()
+        self.connection_manager = MemoryRdtConnectionRepository()
     
     def handle_datagram(self, address: Tuple[str, int], data: bytes) -> Optional[bytes]:
         """
         Maneja un datagrama recibido.
-        Solo procesa paquetes de control para creación de conexiones.
-        Devuelve RDTRequest serializada con tipo REQUEST_ACCEPTED.
-        response = data_handler(data)
-        send_response(response)
+        Distribuye el paquete a la conexión apropiada para procesamiento.
+        
+        Args:
+            address: Dirección del cliente (IP, puerto)
+            data: Datos del paquete recibido
+            
+        Returns:
+            None (las respuestas se manejan dentro de las conexiones)
         """
         str_address = f"{address[0]}:{address[1]}"
 
-        #1. Verifico si tengo una conexion con esa direccion, si no la creo 
-        #2 luego , envio hacia el handler de datos la info que se encarga de procesarla
-        #3 con la respuesta del handler de datos, envio hacia el handler de control la respuesta a la address mediante socket
-
+        # 1. Verificar si tengo una conexión con esa dirección
+        connection = self.connection_manager.get_connection(str_address)
         
+        if connection:
+            # 2. Conexión existente - añadir petición a la cola
+            connection.add_request(data)
+            print(f"[RDT] Petición añadida a conexión existente {str_address}")
+        else:
+            # 3. Nueva conexión - crear y añadir petición
+            connection = RdtConnection(address=str_address)
+            connection.add_request(data)
+            self.connection_manager.add_connection(str_address, connection)
+            print(f"[RDT] Nueva conexión creada para {str_address}")
         
-       
+        return None
+    
+    def shutdown(self):
+        """Cierra todas las conexiones activas"""
+        print("[RDT] Iniciando shutdown del servidor RDT")
+        for address, connection in self.connection_manager.connections.items():
+            connection.shutdown()
+        self.connection_manager.connections.clear()
+        print("[RDT] Shutdown del servidor RDT completado")
