@@ -44,21 +44,20 @@ class RdtMessage:
         return flag_byte + max_window_byte + seq_num_bytes + ref_num_bytes + self.data
 
 class RdtResponse:
-    def __init__(self, flag: int, max_window: int, seq_num: int, ref_num: int, data: bytes, last_packet: bool = False):
-        self.message = RdtMessage(flag, max_window, seq_num, ref_num, data, last_packet)
+    def __init__(self, flag: int, max_window: int, seq_num: int, ref_num: int, data: bytes):
+        self.message = RdtMessage(flag, max_window, seq_num, ref_num, data)
 
     @classmethod
     def new_ack_response(cls, max_window: int, seq_num: int, ref_num: int) -> "RdtResponse":
-        return cls(flag=1, max_window=max_window, seq_num=seq_num, ref_num=ref_num, data=b'', last_packet=False)
+        return cls(flag=1, max_window=max_window, seq_num=seq_num, ref_num=ref_num, data=b'')
 
     @classmethod
-    def new_data_response(cls, max_window: int, seq_num: int, ref_num: int, data: bytes, last_packet: bool = False) -> "RdtResponse":
-        return cls(flag=0, max_window=max_window, seq_num=seq_num, ref_num=ref_num, data=data, last_packet=last_packet)
+    def new_data_response(cls, max_window: int, seq_num: int, ref_num: int, data: bytes) -> "RdtResponse":
+        return cls(flag=0, max_window=max_window, seq_num=seq_num, ref_num=ref_num, data=data)
 
 class RdtRequest:
-    def __init__(self, address: str, session_id: int, request: bytes):
+    def __init__(self, address: str, request: bytes):
         self.address = address
-        #self.session_id = session_id
         self.message = RdtMessage.from_bytes(request)
     
     def is_ack(self) -> bool:
