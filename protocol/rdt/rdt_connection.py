@@ -45,6 +45,7 @@ class RdtConnection:
                 # Verificar timeout de conexión general
                 if time.time() - self.last_activity > CONNECTION_TIMEOUT:
                     logger.warning(f"Timeout de conexión para {self.address}")
+                    self.shutdown() 
                     break
                 
                 # Procesar mensajes
@@ -261,6 +262,14 @@ class RdtConnection:
         """Handle de timeout de handshake"""
         try:
             if not self.handshake_completed and self.is_active:
+                # Verificar primero si ya se superó el máximo de intentos
+                if self.handshake_attempts >= HANDSHAKE_MAX_ATTEMPTS:
+                    logger.error(f"Máximo número de intentos alcanzado para {self.address}")
+                    logger.error(f"Descartando conexión con {self.address}")
+                    self.is_active = False
+                    self.shutdown()
+                    return
+                
                 self.handshake_attempts += 1
                 
                 # Si el cliente no ha respondido, reintentar enviar el ACK
@@ -271,11 +280,6 @@ class RdtConnection:
                 else:
                     logger.warning(f"Timeout de handshake para {self.address} (intento {self.handshake_attempts}/{HANDSHAKE_MAX_ATTEMPTS})")
                 
-                # Verificar que no se haya superado el máximo de intentos
-                if self.handshake_attempts >= HANDSHAKE_MAX_ATTEMPTS:
-                    logger.error(f"Máximo número de intentos alcanzado para {self.address}")
-                    logger.error(f"Descartando conexión con {self.address}")
-                    self.is_active = False
         except Exception as e:
             logger.error(f"Error en timeout de handshake: {e}")
             self.is_active = False
@@ -297,6 +301,14 @@ class RdtConnection:
         logger.info(f"Iniciando shutdown de conexión {self.address}")
         self.is_active = False
         self._stop_handshake_timer()  # Detener timer al cerrar
+        
+        # Limpiar la cola de requests pendientes
+        try:
+            while not self.request_queue.empty():
+                self.request_queue.get_nowait()
+        except Empty:
+            pass  # La cola ya está vacía
+        
         logger.info(f"Conexión {self.address} cerrada")
 
 # ================================[REPOSITORIO ABSTRACTO]===============================
