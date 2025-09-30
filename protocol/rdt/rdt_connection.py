@@ -135,8 +135,8 @@ class RdtConnection:
     def _handle_first_data_packet(self, rdt_request: RdtRequest) -> None:
         """Maneja el primer paquete de datos después del handshake"""
         try:
-            # Validar que sea un paquete de datos (FLAG = 0 con datos o FLAG = 2 si es el último)
-            if rdt_request.message.flag not in [FLAG_DATA, FLAG_LAST]:
+            # Validar que sea un paquete de datos 
+            if rdt_request.message.flag not in [FLAG_ACK,FLAG_LAST]:
                 logger.warning(f"Se esperaba paquete de datos de {self.address}, se recibió FLAG={rdt_request.message.flag}")
                 return
             
@@ -147,6 +147,8 @@ class RdtConnection:
             
             # Procesar el paquete de datos que corresponde al primer paquete de datos
             self._handle_data_message(rdt_request)
+            #self.send_ack()
+            #self.start_data_wait_timer()
                 
         except Exception as e:
             logger.error(f"Error procesando primer paquete de datos de {self.address}: {e}")
@@ -160,6 +162,8 @@ class RdtConnection:
             if self.data_handler:
                 response = self.data_handler.handle_data(rdt_request.message.data)
                 self._send_response(response)
+                #self.send_ack()
+                #self.start_data_wait_timer()
             
         except Exception as e:
             logger.error(f"Error procesando paquete de datos: {e}")
