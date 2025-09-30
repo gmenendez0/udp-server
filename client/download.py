@@ -10,7 +10,6 @@ import os
 import sys
 from pathlib import Path
 
-
 def parse_args():
     """Parsea argumentos de línea de comandos"""
     parser = argparse.ArgumentParser(
@@ -80,7 +79,17 @@ def download_file(args):
         elif not args.quiet:
             print(f"Descargando {args.name} desde {args.host}:{args.port}")
 
-        # TODO: Implementar protocolo UDP RDT
+        if args.protocol == "stop-and-wait":
+            from .stop_and_wait import handle_download_stop_and_wait
+            return handle_download_stop_and_wait(target_file, args.host, args.port, args.name)
+        elif args.protocol == "go-back-n":
+            from .go_back_n import handle_download_go_back_n
+            return handle_download_go_back_n(target_file, args.host, args.port, args.name)
+        else:
+            print(f"Protocolo no soportado: {args.protocol}")
+            from protocol.const import get_error_message, ERR_INVALID_PROTOCOL
+            print(f"Código de error: {get_error_message(ERR_INVALID_PROTOCOL)}")
+            return False
 
     except (FileNotFoundError, ValueError, PermissionError) as e:
         print(f"Error: {e}")

@@ -3,13 +3,22 @@ import struct
 import time
 
 # ==== Constantes ====
-T_DATA, T_ACK, T_CTRL = 0x00, 0x01, 0x02
+T_DATA, T_ACK, T_CTRL, T_HANDSHAKE = 0x00, 0x01, 0x02, 0x03
 F_LAST, F_ERR = 0x01, 0x02
 
 OP_REQUEST_UPLOAD, OP_UPLOAD_ACCEPTED = 0x01, 0x02
 OP_DOWNLOAD_ACCEPTED = 0x04
 OP_REQUEST_DOWNLOAD, OP_END_SESSION, OP_ERROR = 0x03, 0x10, 0x7F
 
+# ==== Códigos de Error ====
+ERR_TOO_BIG = 1          # Archivo excede el tamaño máximo
+ERR_NOT_FOUND = 2        # Archivo no encontrado
+ERR_BAD_REQUEST = 3      # Solicitud malformada
+ERR_PERMISSION_DENIED = 4 # Permisos insuficientes
+ERR_NETWORK_ERROR = 5    # Error de red
+ERR_TIMEOUT_ERROR = 6    # Timeout
+ERR_INVALID_PROTOCOL = 7 # Protocolo no soportado
+ERR_SERVER_ERROR = 8     # Error interno del servidor
 
 # ==== Constantes TLV ====
 TLV_FILENAME = 0x01
@@ -19,7 +28,6 @@ TLV_WINDOW_REQ = 0x04
 TLV_CHUNK_SIZE = 0x05
 TLV_ERROR_CODE = 0x06
 TLV_ERROR_MESSAGE = 0x07
-
 
 PROTO_STOP_WAIT, PROTO_GBN = 0, 1
 
@@ -104,3 +112,43 @@ def build_request_upload(filename: str, size_bytes: int, proto: int, window_req:
 def generate_new_sid():
     """Genera un nuevo SID (simplemente un timestamp por simplicidad)"""
     return int(time.time() * 1000) & 0xFFFFFFFF  # 32 bits
+
+# ==== Funciones de Error ====
+def build_error_response(error_code: int, error_message: str = "", sid: int = 0) -> bytes:
+    """
+    Construye un paquete de respuesta de error.
+    
+    Args:
+        error_code (int): Código de error (ERR_*)
+        error_message (str): Mensaje de error opcional
+        sid (int): Session ID
+        
+    Returns:
+        bytes: Paquete de error formateado
+    """
+    tlvs = [tlv_u8(TLV_ERROR_CODE, error_code)]
+    if error_message:
+        tlvs.append(tlv_str(TLV_ERROR_MESSAGE, error_message))
+    return make_ctrl_packet(OP_ERROR, tlvs, sid=sid)
+
+def get_error_message(error_code: int) -> str:
+    """
+    Obtiene el mensaje de error correspondiente al código.
+    
+    Args:
+        error_code (int): Código de error
+        
+    Returns:
+        str: Mensaje de error descriptivo
+    """
+    error_messages = {
+        ERR_TOO_BIG: "Archivo excede el tamaño máximo permitido",
+        ERR_NOT_FOUND: "Archivo no encontrado",
+        ERR_BAD_REQUEST: "Solicitud malformada",
+        ERR_PERMISSION_DENIED: "Permisos insuficientes",
+        ERR_NETWORK_ERROR: "Error de red",
+        ERR_TIMEOUT_ERROR: "Timeout en la operación",
+        ERR_INVALID_PROTOCOL: "Protocolo no soportado",
+        ERR_SERVER_ERROR: "Error interno del servidor"
+    }
+    return error_messages.get(error_code, f"Error desconocido (código: {error_code})")

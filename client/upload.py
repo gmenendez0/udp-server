@@ -9,8 +9,6 @@ import os
 import sys
 import re
 from pathlib import Path
-from client.stop_and_wait import handle_upload
-
 
 def parse_args():
     """Parsea argumentos de línea de comandos"""
@@ -94,7 +92,17 @@ def upload_file(args):
         elif not args.quiet:
             print(f"Subiendo {source_file.name} a {args.host}:{args.port}")
 
-        return handle_upload(source_file, args.host, args.port, target_name, args.protocol)
+        if args.protocol == "stop-and-wait":
+            from .stop_and_wait import handle_upload_stop_and_wait
+            return handle_upload_stop_and_wait(source_file, args.host, args.port, target_name)
+        elif args.protocol == "go-back-n":
+            from .go_back_n import handle_upload_go_back_n
+            return handle_upload_go_back_n(source_file, args.host, args.port, target_name)
+        else:
+            print(f"Protocolo no soportado: {args.protocol}")
+            from protocol.const import get_error_message, ERR_INVALID_PROTOCOL
+            print(f"Código de error: {get_error_message(ERR_INVALID_PROTOCOL)}")
+            return False
         
     except Exception as e:
         print(f"Error al subir el archivo: {e}")
