@@ -1,8 +1,7 @@
+#!/usr/bin/env python3
 """
 Implementación del protocolo Go Back N para transferencia de archivos.
 """
-
-
 
 import logging
 from pathlib import Path
@@ -41,7 +40,7 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str) -> 
     client = RdtClient(host, port)
     
     try:
-        if not client.connect():
+        if not client.connect(): #HandShake
             logger.error("No se pudo establecer conexión con el servidor")
             return False
         
@@ -49,12 +48,11 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str) -> 
         
         connection_state = ConnectionState(client.get_handshake_info())
         
-        # --- Lógica de Go-Back-N ---
         window_size = connection_state.get_max_window()
         base = connection_state.get_next_sequence_number()
         next_seq_num = base
         
-        # Buffer para paquetes enviados pero no confirmados (ACKed)
+        # Buffer para paquetes enviados pero no confirmados (Esperan el ACK correspondiente)
         sent_packets = {} 
         
         total_size = path.stat().st_size
@@ -74,17 +72,16 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str) -> 
         next_seq_num += 1
 
         with open(path, "rb") as file:
-            # Bandera para saber si ya leímos todo el archivo
-            file_fully_read = False
+
+            file_fully_read = False #Flag para el corte cuando llego al EOF
             
             while not file_fully_read or base < next_seq_num:
-                # --- Fase de Envío: Llenar la ventana ---
-                while next_seq_num < base + window_size and not file_fully_read:
+                
+                while next_seq_num < base + window_size and not file_fully_read: # Envío hasta llenar la window
                     chunk = file.read(CHUNK_SIZE)
                     if not chunk:
                         file_fully_read = True
-                        break # Salir del bucle de envío si no hay más data
-
+                        break 
                     is_last_chunk = file.tell() >= total_size
                     flag = F_LAST if is_last_chunk else T_DATA
 
@@ -100,7 +97,7 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str) -> 
                     logger.info(f"Enviado chunk seq={next_seq_num} (ventana: [{base}, {base+window_size-1}])")
                     next_seq_num += 1
                 
-                # --- Fase de Espera/Recepción de ACKs ---
+                #Espero los ACKs
                 data, _, close_signal = client.receive()
                 
                 if close_signal:
@@ -112,9 +109,9 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str) -> 
                     client.stats['retransmissions'] += 1
                     for i in range(base, next_seq_num):
                         client.send(sent_packets[i])
-                    continue # Volver a esperar ACK
+                    continue # Volver a esperar ACKs
 
-                # --- Procesar ACK ---
+                # Proceso los ACks
                 try:
                     rdt_response = RdtRequest(address=f"{host}:{port}", request=data)
                     
@@ -127,9 +124,9 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str) -> 
                         ack_num = rdt_response.get_ref_num() - 1
                         logger.info(f"ACK recibido para seq={ack_num}")
                         
-                        # Si el ACK es válido (mayor o igual a la base), deslizar la ventana
+                        # Si el ACK es válido, deslizar la ventana y eliminar paquetes confirmados de sent_packets
                         if ack_num >= base:
-                            # Eliminar paquetes confirmados del buffer
+                            
                             for i in range(base, ack_num + 1):
                                 if i in sent_packets:
                                     del sent_packets[i]
@@ -167,7 +164,7 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str) -
     client = RdtClient(host, port)
     
     try:
-        if not client.connect():
+        if not client.connect(): #Handshake
             logger.error("No se pudo establecer conexión con el servidor")
             return False
         
@@ -175,7 +172,7 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str) -
         
         connection_state = ConnectionState(client.get_handshake_info())
 
-        # 1. Solicitar el archivo
+        # Solicitar el archivo
         request_msg = RdtMessage(
             flag=T_DATA, max_window=connection_state.get_max_window(),
             seq_num=connection_state.get_next_sequence_number(),
@@ -186,8 +183,7 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str) -
         client.send(request_msg.to_bytes())
         logger.info(f"Solicitando descarga de {filename}...")
         
-        # --- Lógica de Go-Back-N (Receptor) ---
-        expected_seq_num = 0 # El servidor comenzará a enviar chunks desde seq=0
+        expected_seq_num = 0 # El servidor envia chunks desde seq_num=0
         file_data = b''
         
         while True:
@@ -199,17 +195,15 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str) -
             
             if not data:
                 logger.warning("Timeout esperando datos del servidor")
-                # En GBN, el receptor no hace nada en un timeout, solo espera.
-                # El emisor se encargará de retransmitir.
+                # TimeOut -> espera la retransmision de los datos
                 continue
             
             try:
                 rdt_response = RdtRequest(address=f"{host}:{port}", request=data)
-                
                 seq_num = rdt_response.get_seq_num()
                 logger.info(f"Recibido chunk con seq={seq_num}. Se esperaba seq={expected_seq_num}.")
 
-                # Si el paquete es el esperado (en orden)
+                # Si el paquete es el esperado
                 if seq_num == expected_seq_num:
                     file_data += rdt_response.get_data()
                     
@@ -217,8 +211,8 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str) -
                     ack_msg = RdtMessage(
                         flag=T_ACK,
                         max_window=connection_state.get_max_window(),
-                        seq_num=expected_seq_num, # irrelevante para el ACK en sí
-                        ref_num=expected_seq_num + 1, # ACK cumulativo
+                        seq_num=expected_seq_num,
+                        ref_num=expected_seq_num + 1, # ACK acumulativo
                         data=b''
                     )
                     client.send(ack_msg.to_bytes())
@@ -230,7 +224,7 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str) -
                     
                     expected_seq_num += 1
 
-                # Si el paquete está fuera de orden o es un duplicado
+                # Si el paquete no es el esperado (está fuera de orden o es un duplicado)
                 else:
                     logger.warning(f"Paquete fuera de orden/duplicado (seq={seq_num}). Descartado.")
                     client.stats['errors'] += 1
@@ -255,9 +249,8 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str) -
         
         if file_data:
             with open(path, "wb") as file:
-                file.write(file_data)
+                file.write(file_data) # Escribo el archivo con los datos recibidos
             logger.info(f"Archivo guardado exitosamente en {path}")
-            
             stats = client.get_stats()
             logger.info(f"Download completado. Estadísticas: {stats}")
             return True
