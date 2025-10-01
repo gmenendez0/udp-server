@@ -54,7 +54,6 @@ def handle_upload_stop_and_wait(path: Path, host: str, port: int, filename: str)
         current_chunk = 1
         
         # Enviar nombre del archivo como primer mensaje
-        # TODO: ver si esto lo dejamos así o lo definimos diferente
         filename_msg = RdtMessage(
             flag=T_DATA,
             max_window=connection_state.get_max_window(),
