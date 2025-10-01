@@ -102,7 +102,7 @@ class RdtConnection:
         """Maneja el primer mensaje con FLAG = HANDSHAKE (0)"""
         try:
             # Validar que sea un mensaje de handshake
-            if rdt_request.message.flag != FLAG_HANDSHAKE:
+            if rdt_request.message.flag != FLAG_DATA:
                 logger.warning(f"Se esperaba mensaje de handshake (FLAG=0) de {self.address}, se recibió FLAG={rdt_request.message.flag}. Ignorando.")
                 return  # Ignorar cualquier otro mensaje
             
@@ -136,7 +136,7 @@ class RdtConnection:
         """Maneja el primer paquete de datos después del handshake"""
         try:
             # Validar que sea un paquete de datos 
-            if rdt_request.message.flag not in [FLAG_ACK,FLAG_LAST]:
+            if not rdt_request.is_data():
                 logger.warning(f"Se esperaba paquete de datos de {self.address}, se recibió FLAG={rdt_request.message.flag}")
                 return
             

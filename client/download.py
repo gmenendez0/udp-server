@@ -79,16 +79,35 @@ def download_file(args):
         elif not args.quiet:
             print(f"Descargando {args.name} desde {args.host}:{args.port}")
 
-        if args.protocol == "stop-and-wait":
-            from .stop_and_wait import handle_download_stop_and_wait
-            return handle_download_stop_and_wait(target_file, args.host, args.port, args.name)
-        elif args.protocol == "go-back-n":
-            from .go_back_n import handle_download_go_back_n
-            return handle_download_go_back_n(target_file, args.host, args.port, args.name)
+        # TODO: COMENTADO TEMPORALMENTE - Solo probar handshake
+        # if args.protocol == "stop-and-wait":
+        #     from .stop_and_wait import handle_download_stop_and_wait
+        #     return handle_download_stop_and_wait(target_file, args.host, args.port, args.name)
+        # elif args.protocol == "go-back-n":
+        #     from .go_back_n import handle_download_go_back_n
+        #     return handle_download_go_back_n(target_file, args.host, args.port, args.name)
+        # else:
+        #     print(f"Protocolo no soportado: {args.protocol}")
+        #     from .rdt_client import get_error_message, ERR_INVALID_PROTOCOL
+        #     print(f"Código de error: {get_error_message(ERR_INVALID_PROTOCOL)}")
+        #     return False
+
+        # TODO: TEMPORAL - Solo probar handshake después de validaciones
+        from .rdt_client import RdtClient
+        
+        if args.verbose:
+            print(f"[VERBOSE] Probando handshake con servidor: {args.host}:{args.port}")
+            print(f"[VERBOSE] Protocolo: {args.protocol}")
+        
+        # Crear cliente y probar handshake
+        client = RdtClient(args.host, args.port)
+        
+        if client.connect():
+            print("Handshake exitoso!")
+            client.close()
+            return True
         else:
-            print(f"Protocolo no soportado: {args.protocol}")
-            from protocol.const import get_error_message, ERR_INVALID_PROTOCOL
-            print(f"Código de error: {get_error_message(ERR_INVALID_PROTOCOL)}")
+            print("Handshake falló")
             return False
 
     except (FileNotFoundError, ValueError, PermissionError) as e:

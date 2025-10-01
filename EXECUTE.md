@@ -78,8 +78,13 @@ python -m client.download -h
 
 ### Ejecutar todos los tests
 ```bash
+# Usando script
 python run_tests.py
+
+# Usando pytest
+pytest tests/
 ```
+
 
 ### Ejecutar tests específicos
 ```bash

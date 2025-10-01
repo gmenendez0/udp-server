@@ -14,24 +14,61 @@ from pathlib import Path
 from protocol.rdt.rdt_message import RdtMessage, RdtRequest
 from protocol.dp.dp_request import DPRequest
 from protocol import FunctionFlag
-from protocol.const import (
-    # Códigos de error
-    ERR_TOO_BIG, ERR_NOT_FOUND, ERR_BAD_REQUEST, ERR_PERMISSION_DENIED,
-    ERR_NETWORK_ERROR, ERR_TIMEOUT_ERROR, ERR_INVALID_PROTOCOL, ERR_SERVER_ERROR,
-    get_error_message,
-    # Constantes de protocolo
-    PROTO_STOP_WAIT, PROTO_GBN,
-    # Tipos de mensaje y flags
-    T_DATA, T_ACK, T_CTRL, T_HANDSHAKE, F_LAST, F_ERR,
-    # Constantes TLV
-    TLV_FILENAME, TLV_FILESIZE, TLV_PROTOCOL, TLV_WINDOW_REQ, TLV_CHUNK_SIZE,
-    TLV_ERROR_CODE, TLV_ERROR_MESSAGE,
-    # Operaciones
-    OP_REQUEST_UPLOAD, OP_UPLOAD_ACCEPTED, OP_DOWNLOAD_ACCEPTED,
-    OP_REQUEST_DOWNLOAD, OP_END_SESSION, OP_ERROR,
-    # Funciones de construcción
-    build_error_response, build_request_upload
-)
+# ================================[CONSTANTES DEL PROTOCOLO]===============================
+# Códigos de error
+ERR_TOO_BIG = 1          # Archivo excede el tamaño máximo
+ERR_NOT_FOUND = 2        # Archivo no encontrado
+ERR_BAD_REQUEST = 3      # Solicitud malformada
+ERR_PERMISSION_DENIED = 4 # Permisos insuficientes
+ERR_NETWORK_ERROR = 5    # Error de red
+ERR_TIMEOUT_ERROR = 6    # Timeout
+ERR_INVALID_PROTOCOL = 7 # Protocolo no soportado
+ERR_SERVER_ERROR = 8     # Error interno del servidor
+
+# Constantes de protocolo
+PROTO_STOP_WAIT, PROTO_GBN = 0, 1
+
+# Tipos de mensaje y flags (consistentes con el servidor)
+# El servidor usa: FLAG_ACK = 1, FLAG_DATA = 0, FLAG_LAST = 2
+FLAG_ACK = 1        # Para ACK
+FLAG_DATA = 0       # Para datos
+FLAG_LAST = 2       # Para último paquete
+
+# Constantes TLV
+TLV_FILENAME = 0x01
+TLV_FILESIZE = 0x02
+TLV_PROTOCOL = 0x03
+TLV_WINDOW_REQ = 0x04
+TLV_CHUNK_SIZE = 0x05
+TLV_ERROR_CODE = 0x06
+TLV_ERROR_MESSAGE = 0x07
+
+# Operaciones
+OP_REQUEST_UPLOAD, OP_UPLOAD_ACCEPTED = 0x01, 0x02
+OP_DOWNLOAD_ACCEPTED = 0x04
+OP_REQUEST_DOWNLOAD, OP_END_SESSION, OP_ERROR = 0x03, 0x10, 0x7F
+
+def get_error_message(error_code: int) -> str:
+    """
+    Obtiene el mensaje de error correspondiente al código.
+    
+    Args:
+        error_code (int): Código de error
+        
+    Returns:
+        str: Mensaje de error descriptivo
+    """
+    error_messages = {
+        ERR_TOO_BIG: "Archivo excede el tamaño máximo permitido",
+        ERR_NOT_FOUND: "Archivo no encontrado",
+        ERR_BAD_REQUEST: "Solicitud malformada",
+        ERR_PERMISSION_DENIED: "Permisos insuficientes",
+        ERR_NETWORK_ERROR: "Error de red",
+        ERR_TIMEOUT_ERROR: "Timeout en la operación",
+        ERR_INVALID_PROTOCOL: "Protocolo no soportado",
+        ERR_SERVER_ERROR: "Error interno del servidor"
+    }
+    return error_messages.get(error_code, f"Error desconocido (código: {error_code})")
 
 # Configurar logging
 logger = logging.getLogger(__name__)
@@ -77,7 +114,7 @@ class RdtHandshake:
             RdtMessage: Mensaje de handshake formateado
         """
         handshake_msg = RdtMessage(
-            flag=T_HANDSHAKE,
+            flag=FLAG_DATA,
             max_window=self.max_window,
             seq_num=self.sequence_number,
             ref_num=self.reference_number,
@@ -98,8 +135,8 @@ class RdtHandshake:
             bool: True si el handshake fue exitoso, False en caso contrario
         """
         try:
-            if rdt_request.message.flag != T_ACK:
-                logger.error(f"Flag incorrecto del servidor: {rdt_request.message.flag}, esperado: {T_ACK} (ACK)")
+            if rdt_request.message.flag != FLAG_ACK:
+                logger.error(f"Flag incorrecto del servidor: {rdt_request.message.flag}, esperado: {FLAG_ACK} (ACK)")
                 return False
             if not rdt_request.is_ack():
                 logger.error("El servidor no envió un ACK")
@@ -444,7 +481,7 @@ def validate_file_size(file_path: Path, max_size_mb: int = MAX_FILE_SIZE_MB) -> 
 
 def create_upload_request(filename: str, file_size: int, protocol: str, window_size: int = 1) -> bytes:
     """
-    Crea un mensaje de solicitud de upload usando las funciones del protocolo.
+    Crea un mensaje de solicitud de upload usando RdtMessage.
     
     Args:
         filename (str): Nombre del archivo
@@ -455,5 +492,17 @@ def create_upload_request(filename: str, file_size: int, protocol: str, window_s
     Returns:
         bytes: Mensaje de solicitud formateado
     """
+    # Crear un mensaje de handshake con la información del upload
+    # El servidor interpretará esto como una solicitud de upload
     proto_code = PROTO_STOP_WAIT if protocol == "stop-and-wait" else PROTO_GBN
-    return build_request_upload(filename, file_size, proto_code, window_size, CHUNK_SIZE)
+    request_data = f"{filename}|{file_size}|{proto_code}|{window_size}|{CHUNK_SIZE}".encode('utf-8')
+    
+    upload_msg = RdtMessage(
+        flag=FLAG_DATA,
+        max_window=window_size,
+        seq_num=0,
+        ref_num=0,
+        data=request_data
+    )
+    
+    return upload_msg.to_bytes()
