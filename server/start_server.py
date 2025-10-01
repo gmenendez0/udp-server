@@ -1,10 +1,6 @@
-from . import udp_server
-import asyncio
+from . import rdt_server
 import argparse
-
-def echo_upper_handler(data: bytes) -> bytes:
-    return b"Echo: " + data.upper()
-
+from protocol.rdt.rdt_connection import MemoryRdtConnectionRepository
 
 def parse_args():
     parser = argparse.ArgumentParser(prog="start-server", description="File transfer UDP server")
@@ -24,8 +20,6 @@ def parse_args():
 
     return parser.parse_args()
 
-
-
 def main():
     args = parse_args()
 
@@ -36,13 +30,21 @@ def main():
     else:
         print(f"Servidor escuchando en {args.host}:{args.port}")
 
-    server = udp_server.UDPServer(host=args.host, port=args.port, buffer_size=1024, handler=echo_upper_handler)
+    # Crear repositorio de conexiones
+    conn_repo = MemoryRdtConnectionRepository()
+    
+    # Crear servidor RDT directamente
+    server = rdt_server.RDTServer(
+        host=args.host, 
+        port=args.port, 
+        buffer_size=1024, 
+        conn_repo=conn_repo
+    )
 
     try:
         server.serve()
     except KeyboardInterrupt:
         print("Server stopped by user.")
-
 
 if __name__ == "__main__":
     main()
