@@ -2,7 +2,7 @@
 Implementación del protocolo Go Back N para transferencia de archivos.
 """
 
-# Despues borrar
+
 
 import logging
 from pathlib import Path
