@@ -1,0 +1,1 @@
+Este es un archivo de prueba más grande para verificar que el upload funciona correctamente con múltiples chunks. Contenido adicional para hacer el archivo más grande y probar el protocolo stop-and-wait.

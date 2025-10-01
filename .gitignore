@@ -1,0 +1,27 @@
+# Archivos de cache de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Archivos de entorno
+.env
+.venv
+env/
+venv/
+
+# Archivos de compilación / empaquetado
+build/
+dist/
+*.egg-info/
+
+# Archivos de pruebas / cobertura
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Configuración de IDEs / editores
+.vscode/
+.idea/
+*.swp
+
