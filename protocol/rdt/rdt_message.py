@@ -1,7 +1,9 @@
+from protocol.const import T_DATA, T_ACK, T_CTRL, T_HANDSHAKE, F_LAST, F_ERR
+
 class RdtMessage:
     
     def __init__(self, flag: int, max_window: int, seq_num: int, ref_num: int, data: bytes):
-        self.flag:          int     = flag # 0 = DATA, 1 = ACK , 2 = LAST
+        self.flag:          int     = flag # T_DATA, T_ACK, F_LAST, T_HANDSHAKE
         self.max_window:    int     = max_window
         self.seq_num:       int     = seq_num
         self.ref_num:       int     = ref_num
@@ -9,7 +11,7 @@ class RdtMessage:
        
 
     #[FLAG_BYTE][MAX WINDOW BYTE][SEQ_NUM][REF_NUM][DATA]
-    #FLAG_BYTE: 0 = DATA, 1 = ACK, 2 = LAST
+    #FLAG_BYTE: T_DATA, T_ACK, F_LAST, T_HANDSHAKE
     #MAX WINDOW BYTE: 1 = STOP AND WAIT, >1 = GO BACK N
     #[SEQ_NUM]: 8 bytes
     #[REF_NUM]: 8 bytes
@@ -18,7 +20,7 @@ class RdtMessage:
     @classmethod
     def from_bytes(cls, raw: bytes) -> "RdtMessage":
         # Flag = primer byte
-        flag = raw[0]  # 0, 1 o 2
+        flag = raw[0]  # 0, 1, 2, 3
         # MaxWindow = segundo byte
         max_window = int.from_bytes(raw[1:2], byteorder="big")
         # Seq Num = tercero a décimo byte (inclusive) - 8 bytes
@@ -49,19 +51,25 @@ class RdtResponse:
 
     @classmethod
     def new_ack_response(cls, max_window: int, seq_num: int, ref_num: int) -> "RdtResponse":
-        return cls(flag=1, max_window=max_window, seq_num=seq_num, ref_num=ref_num, data=b'')
+        return cls(flag=T_ACK, max_window=max_window, seq_num=seq_num, ref_num=ref_num, data=b'')
 
     @classmethod
     def new_data_response(cls, max_window: int, seq_num: int, ref_num: int, data: bytes) -> "RdtResponse":
-        return cls(flag=0, max_window=max_window, seq_num=seq_num, ref_num=ref_num, data=data)
+        return cls(flag=T_DATA, max_window=max_window, seq_num=seq_num, ref_num=ref_num, data=data)
 
 class RdtRequest:
     def __init__(self, address: str, request: bytes):
         self.address = address
         self.message = RdtMessage.from_bytes(request)
     
+    def is_handshake(self) -> bool:
+        return self.message.flag == T_HANDSHAKE
+    
+    def is_data(self) -> bool:
+        return self.message.flag == T_DATA
+    
     def is_ack(self) -> bool:
-        return self.message.flag == 1
+        return self.message.flag == T_ACK
     
     def is_last(self) -> bool:
         return self.message.flag == 2
