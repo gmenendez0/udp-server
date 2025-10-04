@@ -3,7 +3,7 @@ import struct
 import time
 
 # ==== Constantes ====
-T_DATA, T_ACK, T_CTRL, T_HANDSHAKE = 0x00, 0x01, 0x02, 0x03
+T_DATA, T_ACK, T_CTRL, T_HANDSHAKE, T_GETDATA = 0x00, 0x01, 0x02, 0x03, 0x04
 F_LAST, F_ERR = 0x01, 0x02
 
 OP_REQUEST_UPLOAD, OP_UPLOAD_ACCEPTED = 0x01, 0x02
