@@ -34,6 +34,7 @@ class RdtConnection:
         self.max_window: Optional[int] = None
 
         self.request_queue: Queue[bytes] = Queue()
+        self.packets_on_fly: list[RdtRequest] = []
         self.last_activity = time.time()
         self.connection_established: bool = False
         self.is_active = True
@@ -121,14 +122,29 @@ class RdtConnection:
         self._send_response(ack_response.message.to_bytes())
         logger.info(f"ACK de handshake enviado a {self.address}")
 
+    def _pending_packets(self):
+        return self.packets_on_fly.last().is_last()
+
+    def _get_next_package(self):
+        pass 
+    
+
+    def _send_window_packages(self) -> None:
+        while self.packets_on_fly.count() < self.max_window and self._pending_packets(): #max window = 3 y mandar 5 paqs
+            pass
+            #nuevo pkg = service.getNextPkg()
+            #enviarPkg()
+            #pkg_on_fly++
+            #quedanPaqsPorEnviar = service.QuedanPaqsPorEnviar
+
     def _handle_data_message1(self, rdt_request: RdtRequest) -> None:
         pass
         #1. Mandar ACK
-        while pkg_on_fly < max_window && QuedanPaqsPorEnviar: max window = 3 y mandar 5 paqs
-            nuevo pkg = service.getNextPkg()
-            enviarPkg()
-            pkg_on_fly++
-            quedanPaqsPorEnviar = service.QuedanPaqsPorEnviar
+        # while pkg_on_fly < max_window && QuedanPaqsPorEnviar: max window = 3 y mandar 5 paqs
+        #     nuevo pkg = service.getNextPkg()
+        #     enviarPkg()
+        #     pkg_on_fly++
+        #     quedanPaqsPorEnviar = service.QuedanPaqsPorEnviar
 
         #2. Procesar rdt req con data handler y obtener rta en bytes
         #3. Si hay una rta para enviar, enviarla
