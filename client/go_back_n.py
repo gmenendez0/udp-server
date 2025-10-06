@@ -9,6 +9,8 @@ from typing import Tuple, Optional
 from protocol.rdt.rdt_message import RdtMessage, RdtRequest
 from protocol.const import T_DATA, T_ACK, F_LAST, T_GETDATA, get_error_message, ERR_NOT_FOUND, ERR_TOO_BIG
 from .rdt_client import RdtClient, ConnectionState, CHUNK_SIZE, MAX_RETRIES, validate_file_size, MAX_FILE_SIZE_MB
+import os
+
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +62,9 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str) -> 
         
         # 1. Enviar nombre del archivo (tratado como el primer paquete)
         filename_msg = RdtMessage(
-            flag=T_DATA, max_window=window_size,
+            flag=T_DATA,
+            max_window=window_size,
+            file_size=os.path.getsize(path),
             seq_num=connection_state.get_next_sequence_number(),
             ref_num=connection_state.get_current_reference_number(),
             data=filename.encode('utf-8')
