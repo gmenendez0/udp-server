@@ -108,7 +108,7 @@ def download_file(args):
             return True
         else:
             print(f"Protocolo no soportado: {args.protocol}")
-            from .rdt_client import get_error_message, ERR_INVALID_PROTOCOL
+            from .constants import get_error_message, ERR_INVALID_PROTOCOL
             print(f"Código de error: {get_error_message(ERR_INVALID_PROTOCOL)}")
             return False
             

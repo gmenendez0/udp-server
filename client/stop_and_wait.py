@@ -12,7 +12,8 @@ import os
 
 # Importar constantes
 from .constants import (
-    T_DATA, T_ACK, T_GETDATA, F_LAST,
+    FLAG_DATA, FLAG_ACK, FLAG_LAST,
+    PREFIX_UPLOAD, PREFIX_DOWNLOAD, PREFIX_DATA, PREFIX_ERROR,
     ERR_TOO_BIG, ERR_NOT_FOUND, ERR_BAD_REQUEST, ERR_PERMISSION_DENIED,
     ERR_NETWORK_ERROR, ERR_TIMEOUT_ERROR, ERR_INVALID_PROTOCOL, ERR_SERVER_ERROR,
     get_error_message, format_upload_request, format_download_request,
@@ -61,7 +62,7 @@ def handle_upload_stop_and_wait(path: Path, host: str, port: int, filename: str)
         current_chunk = 1
         file_info = format_upload_request(filename, total_size)
         file_info_msg = RdtMessage(
-            flag=T_DATA,
+            flag=FLAG_DATA,
             max_window=connection_state.get_max_window(),
             seq_num=connection_state.get_next_sequence_number(),
             ref_num=connection_state.get_current_reference_number(),
@@ -122,8 +123,8 @@ def handle_upload_stop_and_wait(path: Path, host: str, port: int, filename: str)
                 is_last_chunk = current_chunk == total_chunks
                 
                 while not success and retries < MAX_RETRIES:
-                    flag = F_LAST if is_last_chunk else T_DATA
-                    chunk_with_prefix = format_chunk_data("U_", chunk)
+                    flag = FLAG_LAST if is_last_chunk else FLAG_DATA
+                    chunk_with_prefix = format_chunk_data(PREFIX_DATA, chunk)
                     current_seq = connection_state.get_next_sequence_number()
                     rdt_msg = RdtMessage(
                         flag=flag,
@@ -216,7 +217,7 @@ def handle_download_stop_and_wait(path: Path, host: str, port: int, filename: st
 
         download_request = format_download_request(filename)
         request_msg = RdtMessage(
-            flag=T_DATA,
+            flag=FLAG_DATA,
             max_window=connection_state.get_max_window(),
             seq_num=connection_state.get_next_sequence_number(),
             ref_num=connection_state.get_current_reference_number(),
@@ -291,18 +292,18 @@ def handle_download_stop_and_wait(path: Path, host: str, port: int, filename: st
                     logger.info(f"Recibido chunk {expected_seq_num}")
                     
                     chunk_data = rdt_response.get_data()
-                    is_valid, error_msg = validate_prefix(chunk_data, "D_")
+                    is_valid, error_msg = validate_prefix(chunk_data, PREFIX_DATA)
                     
                     if is_valid:
                         # Chunk válido de download
-                        chunk_data = remove_prefix(chunk_data, "D_")
+                        chunk_data = remove_prefix(chunk_data, PREFIX_DATA)
                         file_data += chunk_data
                     else:
                         logger.error(error_msg)
                         return False
                     
                     ack_msg = RdtMessage(
-                        flag=T_ACK,
+                        flag=FLAG_ACK,
                         max_window=connection_state.get_max_window(),
                         seq_num=expected_seq_num,
                         ref_num=expected_seq_num + 1,
@@ -317,19 +318,44 @@ def handle_download_stop_and_wait(path: Path, host: str, port: int, filename: st
                     expected_seq_num += 1
                     
                 elif rdt_response.get_seq_num() < expected_seq_num:
+                    # Paquete duplicado - validar y reenviar ACK
                     logger.info(f"Paquete duplicado {rdt_response.get_seq_num()}, reenviando ACK")
+                    
+                    # Validar prefijo del paquete duplicado
+                    chunk_data = rdt_response.get_data()
+                    is_valid, error_msg = validate_prefix(chunk_data, PREFIX_DATA)
+                    
+                    if not is_valid:
+                        logger.error(f"Paquete duplicado con prefijo inválido: {error_msg}")
+                        return False
+                    
+                    # Reenviar ACK del paquete duplicado
                     ack_msg = RdtMessage(
-                        flag=T_ACK,
+                        flag=FLAG_ACK,
                         max_window=connection_state.get_max_window(),
                         seq_num=rdt_response.get_seq_num(),
                         ref_num=rdt_response.get_seq_num() + 1,
                         data=b''
                     )
                     client.send(ack_msg.to_bytes())
+                    logger.info(f"ACK reenviado para paquete duplicado seq={rdt_response.get_seq_num()}")
                     
                 else:
-                    # Paquete fuera de orden, descartar
+                    # Paquete fuera de orden - descartar y enviar ACK del último recibido
                     logger.warning(f"Paquete fuera de orden {rdt_response.get_seq_num()}, esperado {expected_seq_num}")
+                    
+                    # Enviar ACK del último paquete recibido correctamente
+                    if expected_seq_num > 0:
+                        last_acked_seq = expected_seq_num - 1
+                        ack_msg = RdtMessage(
+                            flag=FLAG_ACK,
+                            max_window=connection_state.get_max_window(),
+                            seq_num=last_acked_seq,
+                            ref_num=last_acked_seq + 1,
+                            data=b''
+                        )
+                        client.send(ack_msg.to_bytes())
+                        logger.info(f"ACK enviado para último paquete correcto seq={last_acked_seq}")
                     
             except Exception as e:
                 logger.error(f"Error parseando paquete: {e}")
