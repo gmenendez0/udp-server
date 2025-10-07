@@ -24,6 +24,9 @@ from .constants import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Constante para fast retransmit
+FAST_RETRANSMIT_THRESHOLD = 3  # Número de ACKs duplicados para activar fast retransmit
+
 
 def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str, max_window: int = 5) -> bool:
     """
@@ -64,7 +67,11 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str, max
         base = connection_state.get_next_sequence_number()
         next_seq_num = base
         
-        sent_packets = {} 
+        sent_packets = {}
+        
+        # Variables para fast retransmit
+        duplicate_ack_count = 0
+        last_ack_num = None 
         
         total_size = path.stat().st_size
         total_chunks = (total_size // CHUNK_SIZE) + (1 if total_size % CHUNK_SIZE else 0)
@@ -237,6 +244,7 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str, max
                         logger.info(f"ACK recibido: server_ref_num={ack_num}, server_seq_num={server_seq}")
                         
                         if ack_num > base:
+                            # ACK nuevo: avanza la ventana
                             # El servidor espera el paquete ack_num, confirmó hasta ack_num-1
                             # Limpiamos paquetes confirmados
                             for i in range(base, ack_num):
@@ -246,7 +254,40 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str, max
                             
                             # Actualizar client_ref_num basándose en el seq_num del servidor
                             connection_state.update_reference_number(server_seq + 1)
+                            
+                            # Reiniciar contadores de ACKs duplicados
+                            duplicate_ack_count = 0
+                            last_ack_num = ack_num
                             logger.info(f"Ventana deslizada. Nueva base={base}")
+                        elif ack_num == base:
+                            # ACK duplicado
+                            if last_ack_num == ack_num:
+                                # Es el mismo ACK que el anterior
+                                duplicate_ack_count += 1
+                                logger.warning(f"ACK duplicado #{duplicate_ack_count} recibido con ref_num={ack_num}")
+                                
+                                # Fast retransmit al alcanzar el threshold
+                                if duplicate_ack_count >= FAST_RETRANSMIT_THRESHOLD:
+                                    logger.warning(f"Fast retransmit activado! Retransmitiendo desde base={base}")
+                                    client.stats['retransmissions'] += 1
+                                    
+                                    # Retransmitir todos los paquetes en la ventana
+                                    for i in range(base, next_seq_num):
+                                        if i in sent_packets:
+                                            client.send(sent_packets[i])
+                                            logger.info(f"Retransmitido paquete seq={i}")
+                                    
+                                    # Reiniciar contador después de retransmitir
+                                    duplicate_ack_count = 0
+                            else:
+                                # Primer ACK duplicado para este base
+                                duplicate_ack_count = 1
+                                last_ack_num = ack_num
+                                logger.warning(f"Primer ACK duplicado recibido con ref_num={ack_num}")
+                        
+                        else:
+                            # ack_num < base: ACK viejo, ignorar
+                            logger.warning(f"ACK viejo recibido con ref_num={ack_num} (base={base}). Ignorando")
                             
                 except Exception as e:
                     logger.error(f"Error parseando ACK: {e}")
