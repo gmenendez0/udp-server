@@ -181,7 +181,7 @@ class RdtConnection:
         # Obtener la data del archivo
         data = rdt_request.get_data()
         file_data = data[2:]  # Sacar el prefijo "D_"
-
+        
         # Appendear los bytes al archivo
         filepath = os.path.join(STORAGE_PATH, self.current_filename)
         append_bytes_to_file(filepath, file_data)
