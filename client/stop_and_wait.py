@@ -172,21 +172,23 @@ def handle_upload_stop_and_wait(path: Path, host: str, port: int, filename: str,
         
         for current_chunk in range(1, total_chunks + 1):
             chunk = file_chunks[current_chunk - 1]
+
             success = False
             retries = 0
             is_last_chunk = current_chunk == total_chunks
             
             while not success and retries < MAX_RETRIES:
                 flag = FLAG_LAST if is_last_chunk else FLAG_DATA
-                chunk_with_prefix = format_chunk_data(PREFIX_DATA, chunk)
                 current_seq = connection_state.get_next_sequence_number()
                 rdt_msg = RdtMessage(
                     flag=flag,
                     max_window=connection_state.get_max_window(),
                     seq_num=current_seq,
                     ref_num=connection_state.get_current_reference_number(),
-                    data=chunk_with_prefix
+                    data=chunk
                 )
+                print(f"chunk: ")
+                print(f"{chunk}")
                 
                 client.send(rdt_msg.to_bytes())
                 logger.info(f"Enviado chunk seq={current_seq} ({current_chunk}/{total_chunks}), esperando ACK...")
