@@ -190,6 +190,10 @@ class RdtConnection:
             logger.info(f"ACK de paq de datos DUPLICADO enviado a {self.address} con ref_num {rdt_request.get_seq_num() + 1}")
             return
         
+        if rdt_request.get_seq_num() > self.ref_num:
+            logger.warning(f"Paquete fuera de orden recibido de {self.address} con seq_num {rdt_request.get_seq_num()}. Esperando seq_num {self.ref_num}. Ignorando.")
+            return
+        
         # Obtener la data del archivo
         self.guido += 1
         data = rdt_request.get_data()
