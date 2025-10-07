@@ -75,7 +75,7 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str, max
             max_window=window_size,
             seq_num=connection_state.get_next_sequence_number(),
             ref_num=connection_state.get_current_reference_number(),
-            data=file_info.encode('utf-8')
+            data=file_info.encode('latin-1')
         )
         client.send(file_info_msg.to_bytes())
         logger.info(f"Enviado información del archivo: {file_info}")
@@ -99,7 +99,7 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str, max
             response_data = rdt_response.get_data()
             if response_data and not response_data.startswith(b'U_') and not response_data.startswith(b'D_'):
                 try:
-                    error_text = response_data.decode('utf-8', errors='ignore')
+                    error_text = response_data.decode('latin-1', errors='ignore')
                     if 'ERROR' in error_text.upper() or 'ERR' in error_text.upper():
                         logger.error(f"Error del servidor: {error_text}")
                     else:
@@ -148,7 +148,7 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str, max
             response_data = rdt_response.get_data()
             if response_data:
                 try:
-                    response_text = response_data.decode('utf-8', errors='ignore')
+                    response_text = response_data.decode('latin-1', errors='ignore')
                     if response_text.startswith('D_OK'):
                         logger.info("Servidor confirmó que está listo para recibir el archivo")
                     elif response_text.startswith('E_'):
@@ -289,7 +289,7 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str, m
             max_window=connection_state.get_max_window(),
             seq_num=connection_state.get_next_sequence_number(),
             ref_num=connection_state.get_current_reference_number(),
-            data=download_request.encode('utf-8')
+            data=download_request.encode('latin-1')
         )
         
         client.send(request_msg.to_bytes())
@@ -310,7 +310,7 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str, m
             
             if response_data and not response_data.startswith(b'D_'):
                 try:
-                    error_text = response_data.decode('utf-8', errors='ignore')
+                    error_text = response_data.decode('latin-1', errors='ignore')
                     if 'ERROR' in error_text.upper() or 'ERR' in error_text.upper():
                         logger.error(f"Error del servidor: {error_text}")
                     else:
