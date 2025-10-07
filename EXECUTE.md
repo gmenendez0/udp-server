@@ -78,8 +78,13 @@ python -m client.download -h
 
 ### Ejecutar todos los tests
 ```bash
+# Usando script
 python run_tests.py
+
+# Usando pytest
+pytest tests/
 ```
+
 
 ### Ejecutar tests específicos
 ```bash
@@ -89,3 +94,12 @@ python -m unittest tests.test_client.test_upload
 # Tests del servidor
 python -m unittest tests.test_server.test_udp_server
 ```
+
+0. Revisar rdt_connection
+1. Comunicacion por ventana -> = 1 (stop & wait) / > 1 (go back n)
+2. Parsear la req de datos
+3. Ejecutar la logica de negocio en base al punto 2
+
+
+controlador -> en base a los bytes que recibe de rdt (data), determina que operacion ejecutar: upload/download
+servicio -> ejecuta la logica de negocio (guardar archivo, leer archivo)

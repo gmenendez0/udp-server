@@ -7,12 +7,19 @@ import logging
 from pathlib import Path
 from typing import Tuple, Optional
 from protocol.rdt.rdt_message import RdtMessage, RdtRequest
-from protocol.const import T_DATA, T_ACK, F_LAST, T_GETDATA, get_error_message, ERR_NOT_FOUND, ERR_TOO_BIG
-from .rdt_client import RdtClient, ConnectionState, CHUNK_SIZE, MAX_RETRIES, validate_file_size, MAX_FILE_SIZE_MB
-import os 
+from .rdt_client import RdtClient, CHUNK_SIZE, MAX_RETRIES, validate_file_size, MAX_FILE_SIZE_MB
+import os
+
+# Importar constantes
+from .constants import (
+    T_DATA, T_ACK, T_GETDATA, F_LAST,
+    ERR_TOO_BIG, ERR_NOT_FOUND, ERR_BAD_REQUEST, ERR_PERMISSION_DENIED,
+    ERR_NETWORK_ERROR, ERR_TIMEOUT_ERROR, ERR_INVALID_PROTOCOL, ERR_SERVER_ERROR,
+    get_error_message, format_upload_request, format_download_request,
+    format_chunk_data, remove_prefix, validate_prefix
+)
 
 logger = logging.getLogger(__name__)
-
 
 def handle_upload_stop_and_wait(path: Path, host: str, port: int, filename: str) -> bool:
     """
@@ -47,28 +54,67 @@ def handle_upload_stop_and_wait(path: Path, host: str, port: int, filename: str)
         
         logger.info("Conexión establecida, iniciando transferencia de archivo")
         
-        # Crear estado de conexión basado en la información del handshake
-        connection_state = ConnectionState(client.get_handshake_info())
+        connection_state = client.get_connection_state()
         
         total_size = path.stat().st_size
         total_chunks = (total_size // CHUNK_SIZE) + (1 if total_size % CHUNK_SIZE else 0)
         current_chunk = 1
-        
-        # Enviar nombre del archivo como primer mensaje
-        filename_msg = RdtMessage(
+        file_info = format_upload_request(filename, total_size)
+        file_info_msg = RdtMessage(
             flag=T_DATA,
-            file_size=os.path.getsize(path),
             max_window=connection_state.get_max_window(),
             seq_num=connection_state.get_next_sequence_number(),
             ref_num=connection_state.get_current_reference_number(),
-            data=filename.encode('utf-8')
+            data=file_info.encode('utf-8')
         )
         
-        client.send(filename_msg.to_bytes())
-        logger.info(f"Enviado nombre del archivo: {filename}")
-        connection_state.increment_sequence_number()
+        client.send(file_info_msg.to_bytes())
+        logger.info(f"Enviado información del archivo: {file_info}")
         
-        # Enviar archivo por chunks
+        data, _, close_signal = client.receive()
+        if close_signal:
+            logger.info("Servidor solicitó cerrar la conexión.")
+            return True
+        if not data:
+            logger.error("Timeout esperando ACK del mensaje inicial")
+            return False
+        
+        try:
+            rdt_response = RdtRequest(address=f"{host}:{port}", request=data)
+            
+            if rdt_response.is_error():
+                error_code = rdt_response.get_error_code()
+                logger.error(f"Error del servidor en mensaje inicial: {get_error_message(error_code)}")
+                return False
+            
+            response_data = rdt_response.get_data()
+            if response_data and not response_data.startswith(b'U_') and not response_data.startswith(b'D_'):
+                try:
+                    error_text = response_data.decode('utf-8', errors='ignore')
+                    if 'ERROR' in error_text.upper() or 'ERR' in error_text.upper():
+                        logger.error(f"Error del servidor: {error_text}")
+                    else:
+                        logger.error(f"Error desconocido del servidor: {error_text}")
+                except:
+                    logger.error("Error del servidor: no se pudo parsear el mensaje de error")
+                return False
+            
+            if rdt_response.is_ack():
+                expected_ref_num = connection_state.get_next_sequence_number() + 1
+                if rdt_response.get_ref_num() == expected_ref_num:
+                    logger.info("ACK recibido para mensaje inicial")
+                    connection_state.update_reference_number(rdt_response.get_ref_num())
+                    connection_state.increment_sequence_number()
+                else:
+                    logger.error(f"ACK inválido para mensaje inicial: {rdt_response.get_ref_num()}, esperado: {expected_ref_num}")
+                    return False
+            else:
+                logger.error("Servidor no envió ACK para mensaje inicial")
+                return False
+        except Exception as e:
+            logger.error(f"Error parseando ACK del mensaje inicial: {e}")
+            return False
+        
         with open(path, "rb") as file:
             while chunk := file.read(CHUNK_SIZE):
                 success = False
@@ -77,16 +123,19 @@ def handle_upload_stop_and_wait(path: Path, host: str, port: int, filename: str)
                 
                 while not success and retries < MAX_RETRIES:
                     flag = F_LAST if is_last_chunk else T_DATA
+                    chunk_with_prefix = format_chunk_data("U_", chunk)
+                    current_seq = connection_state.get_next_sequence_number()
                     rdt_msg = RdtMessage(
                         flag=flag,
                         max_window=connection_state.get_max_window(),
-                        seq_num=connection_state.get_next_sequence_number(),
+                        seq_num=current_seq,
                         ref_num=connection_state.get_current_reference_number(),
-                        data=chunk
+                        data=chunk_with_prefix
                     )
                     
                     client.send(rdt_msg.to_bytes())
-                    logger.info(f"Enviado chunk seq={connection_state.get_next_sequence_number()} ({current_chunk}/{total_chunks}), esperando ACK...")
+                    logger.info(f"Enviado chunk seq={current_seq} ({current_chunk}/{total_chunks}), esperando ACK...")
+                    connection_state.increment_sequence_number()
                     
                     data, _, close_signal = client.receive()
                     
@@ -95,7 +144,7 @@ def handle_upload_stop_and_wait(path: Path, host: str, port: int, filename: str)
                         return True
                     
                     if not data:
-                        logger.warning(f"Timeout esperando ACK para chunk seq={connection_state.get_next_sequence_number()}")
+                        logger.warning(f"Timeout esperando ACK para chunk seq={current_seq}")
                         retries += 1
                         client.stats['retransmissions'] += 1
                         continue
@@ -108,14 +157,13 @@ def handle_upload_stop_and_wait(path: Path, host: str, port: int, filename: str)
                             logger.error(f"Error del servidor: {get_error_message(error_code)}")
                             return False
                         
-                        expected_ref_num = connection_state.get_next_sequence_number() + 1
+                        expected_ref_num = current_seq + 1
                         if rdt_response.is_ack() and rdt_response.get_ref_num() == expected_ref_num:
-                            logger.info(f"ACK recibido para chunk seq={connection_state.get_next_sequence_number()}")
+                            logger.info(f"ACK recibido para chunk seq={current_seq}")
                             success = True
                             connection_state.update_reference_number(rdt_response.get_ref_num())
-                            connection_state.increment_sequence_number()
                         else:
-                            logger.warning(f"ACK inválido para chunk seq={connection_state.get_next_sequence_number()}")
+                            logger.warning(f"ACK inválido para chunk seq={current_seq}")
                             retries += 1
                             client.stats['errors'] += 1
                             
@@ -164,21 +212,63 @@ def handle_download_stop_and_wait(path: Path, host: str, port: int, filename: st
         
         logger.info("Conexión establecida, solicitando descarga de archivo")
         
-        connection_state = ConnectionState(client.get_handshake_info())
+        connection_state = client.get_connection_state()
 
-        # TODO: ver si esto lo dejamos así o lo definimos diferente
+        download_request = format_download_request(filename)
         request_msg = RdtMessage(
-            flag=T_GETDATA,
+            flag=T_DATA,
             max_window=connection_state.get_max_window(),
             seq_num=connection_state.get_next_sequence_number(),
             ref_num=connection_state.get_current_reference_number(),
-            data=filename.encode('utf-8')
+            data=download_request.encode('utf-8')
         )
         
         client.send(request_msg.to_bytes())
-        logger.info(f"Solicitando descarga de {filename}...")
+        logger.info(f"Solicitando descarga: {download_request}")
         
-        connection_state.increment_sequence_number()
+        data, _, close_signal = client.receive()
+        if close_signal:
+            logger.info("Servidor solicitó cerrar la conexión.")
+            return True
+        if not data:
+            logger.error("Timeout esperando ACK de la solicitud de download")
+            return False
+        
+        try:
+            rdt_response = RdtRequest(address=f"{host}:{port}", request=data)
+            
+            if rdt_response.is_error():
+                error_code = rdt_response.get_error_code()
+                logger.error(f"Error del servidor en solicitud de download: {get_error_message(error_code)}")
+                return False
+            
+            response_data = rdt_response.get_data()
+            if response_data and not response_data.startswith(b'U_') and not response_data.startswith(b'D_'):
+                try:
+                    error_text = response_data.decode('utf-8', errors='ignore')
+                    if 'ERROR' in error_text.upper() or 'ERR' in error_text.upper():
+                        logger.error(f"Error del servidor: {error_text}")
+                    else:
+                        logger.error(f"Error desconocido del servidor: {error_text}")
+                except:
+                    logger.error("Error del servidor: no se pudo parsear el mensaje de error")
+                return False
+            
+            if rdt_response.is_ack():
+                expected_ref_num = connection_state.get_next_sequence_number() + 1
+                if rdt_response.get_ref_num() == expected_ref_num:
+                    logger.info("ACK recibido para solicitud de download")
+                    connection_state.update_reference_number(rdt_response.get_ref_num())
+                    connection_state.increment_sequence_number()
+                else:
+                    logger.error(f"ACK inválido para solicitud de download: {rdt_response.get_ref_num()}, esperado: {expected_ref_num}")
+                    return False
+            else:
+                logger.error("Servidor no envió ACK para solicitud de download")
+                return False
+        except Exception as e:
+            logger.error(f"Error parseando ACK de la solicitud de download: {e}")
+            return False
         
         expected_seq_num = 0
         file_data = b''
@@ -200,7 +290,16 @@ def handle_download_stop_and_wait(path: Path, host: str, port: int, filename: st
                 if rdt_response.get_seq_num() == expected_seq_num:
                     logger.info(f"Recibido chunk {expected_seq_num}")
                     
-                    file_data += rdt_response.get_data()
+                    chunk_data = rdt_response.get_data()
+                    is_valid, error_msg = validate_prefix(chunk_data, "D_")
+                    
+                    if is_valid:
+                        # Chunk válido de download
+                        chunk_data = remove_prefix(chunk_data, "D_")
+                        file_data += chunk_data
+                    else:
+                        logger.error(error_msg)
+                        return False
                     
                     ack_msg = RdtMessage(
                         flag=T_ACK,

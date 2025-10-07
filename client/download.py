@@ -87,11 +87,11 @@ def download_file(args):
             return handle_download_go_back_n(target_file, args.host, args.port, args.name)
         else:
             print(f"Protocolo no soportado: {args.protocol}")
-            from protocol.const import get_error_message, ERR_INVALID_PROTOCOL
+            from .rdt_client import get_error_message, ERR_INVALID_PROTOCOL
             print(f"Código de error: {get_error_message(ERR_INVALID_PROTOCOL)}")
             return False
-
-    except (FileNotFoundError, ValueError, PermissionError) as e:
+            
+    except (FileNotFoundError, ValueError, PermissionError, socket.error) as e:
         print(f"Error: {e}")
         return False
     except Exception as e:

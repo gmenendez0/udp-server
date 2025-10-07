@@ -10,7 +10,6 @@ class RDTServer:
         self._recv_buffer_size = buffer_size
         self._skt = None
         self._conn_repo = conn_repo
-        self._session_id = {}
         self._active_threads = {}  # Diccionario para manejar hilos activos
         self._is_running = True
 
@@ -30,7 +29,7 @@ class RDTServer:
                     print(f"[RDT] Petición añadida a conexión existente {str_address}")
                 else:
                     # Crear nueva conexión sin hilo
-                    connection = RdtConnection(address=str_address, session_id=0)
+                    connection = RdtConnection(address=str_address)
                     connection.add_request(data)
                     self._conn_repo.add_connection(str_address, connection)
                     

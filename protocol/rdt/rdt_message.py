@@ -1,9 +1,13 @@
-from protocol.const import T_DATA, T_ACK, T_CTRL, T_HANDSHAKE, F_LAST, F_ERR
+# FLAGS
+FLAG_HANDSHAKE = 0
+FLAG_ACK = 1
+FLAG_DATA = 2
+FLAG_LAST = 3
 
 class RdtMessage:
     
     def __init__(self, flag: int, max_window: int, seq_num: int, ref_num: int, data: bytes):
-        self.flag:          int     = flag # T_DATA, T_ACK, F_LAST, T_HANDSHAKE
+        self.flag:          int     = flag # T_DATA, T_ACK, F_LAST
         self.max_window:    int     = max_window
         self.seq_num:       int     = seq_num
         self.ref_num:       int     = ref_num
@@ -11,12 +15,10 @@ class RdtMessage:
        
 
     #[FLAG_BYTE][MAX WINDOW BYTE][SEQ_NUM][REF_NUM][DATA]
-    #FLAG_BYTE: T_DATA, T_ACK, F_LAST, T_HANDSHAKE
+    #FLAG_BYTE: T_DATA, T_ACK, F_LAST
     #MAX WINDOW BYTE: 1 = STOP AND WAIT, >1 = GO BACK N
     #[SEQ_NUM]: 8 bytes
     #[REF_NUM]: 8 bytes
-
-
     @classmethod
     def from_bytes(cls, raw: bytes) -> "RdtMessage":
         # Flag = primer byte
@@ -51,28 +53,35 @@ class RdtResponse:
 
     @classmethod
     def new_ack_response(cls, max_window: int, seq_num: int, ref_num: int) -> "RdtResponse":
-        return cls(flag=T_ACK, max_window=max_window, seq_num=seq_num, ref_num=ref_num, data=b'')
+        return cls(flag=FLAG_ACK, max_window=max_window, seq_num=seq_num, ref_num=ref_num, data=b'')
 
     @classmethod
     def new_data_response(cls, max_window: int, seq_num: int, ref_num: int, data: bytes) -> "RdtResponse":
-        return cls(flag=T_DATA, max_window=max_window, seq_num=seq_num, ref_num=ref_num, data=data)
+        return cls(flag=FLAG_DATA, max_window=max_window, seq_num=seq_num, ref_num=ref_num, data=data)
+
+    @classmethod
+    def new_last_response(cls, max_window: int, seq_num: int, ref_num: int, data: bytes) -> "RdtResponse":
+        return cls(flag=FLAG_LAST, max_window=max_window, seq_num=seq_num, ref_num=ref_num, data=data)
+
+    def is_last(self) -> bool:
+        return self.message.flag == FLAG_LAST
 
 class RdtRequest:
     def __init__(self, address: str, request: bytes):
         self.address = address
         self.message = RdtMessage.from_bytes(request)
     
-    def is_handshake(self) -> bool:
-        return self.message.flag == T_HANDSHAKE
-    
     def is_data(self) -> bool:
-        return self.message.flag == T_DATA
+        return self.message.flag == FLAG_DATA or self.message.flag == FLAG_LAST
     
     def is_ack(self) -> bool:
-        return self.message.flag == T_ACK
+        return self.message.flag == FLAG_ACK
     
     def is_last(self) -> bool:
-        return self.message.flag == 2
+        return self.message.flag == FLAG_LAST
+
+    def is_handshake(self) -> bool:
+        return self.message.flag == FLAG_HANDSHAKE
     
     def get_max_window(self) -> int:
         return self.message.max_window
@@ -85,3 +94,14 @@ class RdtRequest:
     
     def get_data(self) -> bytes:
         return self.message.data
+
+    def is_valid_handshake_message(self) -> bool:
+        if self.get_max_window() is None or self.get_max_window() <= 0:
+            print(f"Max window inválido: {self.get_max_window()}")
+            return False
+
+        if self.get_seq_num() is None or self.get_seq_num() < 0:
+            print(f"Seq num inválido: {self.get_seq_num()}")
+            return False
+
+        return True

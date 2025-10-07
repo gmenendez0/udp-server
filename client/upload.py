@@ -100,10 +100,10 @@ def upload_file(args):
             return handle_upload_go_back_n(source_file, args.host, args.port, target_name)
         else:
             print(f"Protocolo no soportado: {args.protocol}")
-            from protocol.const import get_error_message, ERR_INVALID_PROTOCOL
+            from .rdt_client import get_error_message, ERR_INVALID_PROTOCOL
             print(f"Código de error: {get_error_message(ERR_INVALID_PROTOCOL)}")
             return False
-        
+            
     except Exception as e:
         print(f"Error al subir el archivo: {e}")
         return False
