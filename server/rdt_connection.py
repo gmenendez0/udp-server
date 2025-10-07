@@ -53,6 +53,8 @@ class RdtConnection:
         self.duplicate_ack_count        : int = 0
         self.last_ack_num               : Optional[int] = None
 
+        self.guido                      : int = 0
+
     def add_request(self, data: bytes) -> None:
         self.request_queue.put(data)
 
@@ -184,6 +186,7 @@ class RdtConnection:
         
         # Appendear los bytes al archivo
         filepath = os.path.join(STORAGE_PATH, self.current_filename)
+        self.guido += 1
         append_bytes_to_file(filepath, data)
 
         # Actualizar el contador de bytes recibidos
@@ -195,6 +198,7 @@ class RdtConnection:
 
         # Verificar si la transferencia está completa. En caso que si, cerrar la conexion
         if rdt_request.is_last():
+            print(f"Guido: {self.guido}")
             logger.info(f"Archivo {self.current_filename} recibido completamente de {self.address}")
             self.shutdown()
 

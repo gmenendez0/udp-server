@@ -13,7 +13,7 @@ def get_file_in_chunks(filename, chunk_size=1024) -> List[bytes]:
             if not chunk:
                 break
             chunks.append(chunk)
-
+    print(f"Chunks: {len(chunks)}")
     return chunks
 
 def get_file_size_in_bytes(filename) -> int | None:
