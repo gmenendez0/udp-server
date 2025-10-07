@@ -123,6 +123,9 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str, max
             else:
                 logger.error("Servidor no envió ACK para mensaje inicial")
                 return False
+        except Exception as e:
+            logger.error(f"Error parseando ACK del mensaje inicial: {e}")
+            return False
         
         # Esperar mensaje D_OK o E_ después del ACK inicial
         data, _, close_signal = client.receive()
@@ -162,7 +165,7 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str, max
                 flag=FLAG_ACK,
                 max_window=connection_state.get_max_window(),
                 seq_num=connection_state.get_next_sequence_number(),
-                ref_num=connection_state.get_next_sequence_number() + 1,
+                ref_num=connection_state.get_next_sequence_number(),
                 data=b''
             )
             client.send(ack_msg.to_bytes())
