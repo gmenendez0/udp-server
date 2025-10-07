@@ -309,7 +309,7 @@ def handle_download_stop_and_wait(path: Path, host: str, port: int, filename: st
                 return False
             
             if rdt_response.is_ack():
-                expected_ref_num = connection_state.get_next_sequence_number()
+                expected_ref_num = connection_state.get_next_sequence_number() + 1
                 if rdt_response.get_ref_num() == expected_ref_num:
                     logger.info("ACK recibido para solicitud de download")
                     connection_state.update_reference_number(rdt_response.get_ref_num())
@@ -324,7 +324,7 @@ def handle_download_stop_and_wait(path: Path, host: str, port: int, filename: st
             logger.error(f"Error parseando ACK de la solicitud de download: {e}")
             return False
         
-        expected_seq_num = 0
+        expected_seq_num = 1
         file_data = b''
         
         while True:

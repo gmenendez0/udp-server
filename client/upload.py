@@ -53,7 +53,7 @@ def validate_file(filepath: str) -> Path:
     
     # Verificar tamaño máximo (5MB según consigna)
     file_size = file_path.stat().st_size
-    max_size = 5 * 1024 * 1024  # 5MB
+    max_size = 5.5 * 1024 * 1024  # 5MB
     if file_size > max_size:
         raise ValueError(f"El archivo {filepath} excede el tamaño máximo de 5MB ({file_size} bytes)")
     

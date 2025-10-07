@@ -20,7 +20,7 @@ from .constants import (
     format_chunk_data, remove_prefix, validate_prefix
 )
 
-
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -108,7 +108,7 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str, max
                 return False
             
             if rdt_response.is_ack():
-                expected_ref_num = connection_state.get_next_sequence_number()
+                expected_ref_num = connection_state.get_next_sequence_number() + 1
                 if rdt_response.get_ref_num() == expected_ref_num:
                     logger.info("ACK recibido para mensaje inicial")
                     connection_state.update_reference_number(rdt_response.get_ref_num())
@@ -268,7 +268,7 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str, m
         bool: True si se completó con éxito, False si falló.
     """
     client = RdtClient(host, port, max_window)
-    
+    print("aquii")
     try:
         if not client.connect():
             logger.error("No se pudo establecer conexión con el servidor")
@@ -301,13 +301,9 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str, m
         try:
             rdt_response = RdtRequest(address=f"{host}:{port}", request=data)
             
-            if rdt_response.is_error():
-                error_code = rdt_response.get_error_code()
-                logger.error(f"Error del servidor en solicitud de download: {get_error_message(error_code)}")
-                return False
-            
             response_data = rdt_response.get_data()
-            if response_data and not response_data.startswith(b'U_') and not response_data.startswith(b'D_'):
+            
+            if response_data and not response_data.startswith(b'D_'):
                 try:
                     error_text = response_data.decode('utf-8', errors='ignore')
                     if 'ERROR' in error_text.upper() or 'ERR' in error_text.upper():
@@ -319,7 +315,7 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str, m
                 return False
             
             if rdt_response.is_ack():
-                expected_ref_num = connection_state.get_next_sequence_number()
+                expected_ref_num = connection_state.get_next_sequence_number() + 1
                 if rdt_response.get_ref_num() == expected_ref_num:
                     logger.info("ACK recibido para solicitud de download")
                     connection_state.update_reference_number(rdt_response.get_ref_num())
@@ -334,7 +330,7 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str, m
             logger.error(f"Error parseando ACK de la solicitud de download: {e}")
             return False
         
-        expected_seq_num = 0
+        expected_seq_num = 1
         file_data = b''
         received_packets = {}  # Buffer para paquetes fuera de orden
         window_size = connection_state.get_max_window()
@@ -377,6 +373,15 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str, m
                             expected_seq_num += 1
                         
                         if is_last:
+                            ack_msg = RdtMessage(
+                                flag=FLAG_ACK,
+                                max_window=connection_state.get_max_window(),
+                                seq_num=expected_seq_num - 1,
+                                ref_num=expected_seq_num,
+                                data=b''
+                            )
+                            client.send(ack_msg.to_bytes())
+                            logger.info(f"Enviado ACK acumulativo para seq={expected_seq_num - 1}")
                             break
                         
                         # Enviar ACK acumulativo

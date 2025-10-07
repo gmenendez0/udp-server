@@ -51,7 +51,7 @@ CHUNK_SIZE = 1024
 ACK_TIMEOUT = 5
 MAX_RETRIES = 5
 WINDOW_SIZE_GO_BACK_N = 5
-MAX_FILE_SIZE_MB = 5  # Según consigna del trabajo
+MAX_FILE_SIZE_MB = 5.5  # Según consigna del trabajo
 
 class ConnectionState:
     """
