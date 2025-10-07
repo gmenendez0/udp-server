@@ -182,6 +182,14 @@ class RdtConnection:
         logger.info(f"Preparado para recibir archivo {filename} de tamaño {filesize} de {self.address}")
 
     def _handle_upload_data(self, rdt_request: RdtRequest) -> None:
+        if rdt_request.get_seq_num() < self.ref_num:
+            logger.warning(f"Paquete duplicado recibido de {self.address} con seq_num {rdt_request.get_seq_num()}. Ignorando.")
+            ack_response = RdtResponse.new_ack_response(self.max_window, self.seq_num, rdt_request.get_seq_num() + 1)
+            self._send_response(ack_response.message.to_bytes())
+            self.seq_num += 1
+            logger.info(f"ACK de paq de datos DUPLICADO enviado a {self.address} con ref_num {rdt_request.get_seq_num() + 1}")
+            return
+        
         # Obtener la data del archivo
         self.guido += 1
         data = rdt_request.get_data()
