@@ -45,13 +45,13 @@ logger = logging.getLogger(__name__)
 
 # Constantes del protocolo
 BUFFER_SIZE = 2048
-HANDSHAKE_TIMEOUT = 5
+HANDSHAKE_TIMEOUT = 6
 HANDSHAKE_MAX_ATTEMPTS = 3
 CHUNK_SIZE = 1024
 ACK_TIMEOUT = 5
 MAX_RETRIES = 5
 WINDOW_SIZE_GO_BACK_N = 5
-MAX_FILE_SIZE_MB = 5  # Según consigna del trabajo
+MAX_FILE_SIZE_MB = 5.5  # Según consigna del trabajo
 
 class ConnectionState:
     """
@@ -128,8 +128,10 @@ class ConnectionState:
                 logger.error(f"Server SEQ incorrecto: {server_seq}, esperado: {self.client_seq_num}")
                 return False
                 
-            if server_ref != self.client_seq_num + 1:
-                logger.error(f"Server REF incorrecto: {server_ref}, esperado: {self.client_seq_num + 1}")
+            # El servidor debe confirmar nuestro seq_num con su ref_num
+            
+            if server_ref != (self.client_seq_num + 1):
+                logger.error(f"Server REF incorrecto: {server_ref}, esperado: {self.client_seq_num}")
                 return False
             
             # Guardar información del servidor

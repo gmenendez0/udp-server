@@ -53,7 +53,7 @@ def validate_file(filepath: str) -> Path:
     
     # Verificar tamaño máximo (5MB según consigna)
     file_size = file_path.stat().st_size
-    max_size = 5 * 1024 * 1024  # 5MB
+    max_size = 5.5 * 1024 * 1024  # 5MB
     if file_size > max_size:
         raise ValueError(f"El archivo {filepath} excede el tamaño máximo de 5MB ({file_size} bytes)")
     
@@ -92,15 +92,18 @@ def upload_file(args):
         elif not args.quiet:
             print(f"Subiendo {source_file.name} a {args.host}:{args.port}")
 
+        # Determinar el tamaño de ventana según el protocolo
+        max_window = 1 if args.protocol == "stop-and-wait" else 5
+        
         if args.protocol == "stop-and-wait":
             from .stop_and_wait import handle_upload_stop_and_wait
-            return handle_upload_stop_and_wait(source_file, args.host, args.port, target_name)
+            return handle_upload_stop_and_wait(source_file, args.host, args.port, target_name, max_window)
         elif args.protocol == "go-back-n":
             from .go_back_n import handle_upload_go_back_n
-            return handle_upload_go_back_n(source_file, args.host, args.port, target_name)
+            return handle_upload_go_back_n(source_file, args.host, args.port, target_name, max_window)
         else:
             print(f"Protocolo no soportado: {args.protocol}")
-            from .rdt_client import get_error_message, ERR_INVALID_PROTOCOL
+            from .constants import get_error_message, ERR_INVALID_PROTOCOL
             print(f"Código de error: {get_error_message(ERR_INVALID_PROTOCOL)}")
             return False
             

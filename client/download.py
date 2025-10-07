@@ -79,12 +79,15 @@ def download_file(args):
         elif not args.quiet:
             print(f"Descargando {args.name} desde {args.host}:{args.port}")
 
+        # Determinar el tamaño de ventana según el protocolo
+        max_window = 1 if args.protocol == "stop-and-wait" else 5
+        
         if args.protocol == "stop-and-wait":
             from .stop_and_wait import handle_download_stop_and_wait
-            return handle_download_stop_and_wait(target_file, args.host, args.port, args.name)
+            return handle_download_stop_and_wait(target_file, args.host, args.port, args.name, max_window)
         elif args.protocol == "go-back-n":
             from .go_back_n import handle_download_go_back_n
-            return handle_download_go_back_n(target_file, args.host, args.port, args.name)
+            return handle_download_go_back_n(target_file, args.host, args.port, args.name, max_window)
         else:
             print(f"Protocolo no soportado: {args.protocol}")
             from .constants import get_error_message, ERR_INVALID_PROTOCOL

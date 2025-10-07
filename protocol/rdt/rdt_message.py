@@ -101,3 +101,30 @@ class RdtRequest:
             return False
 
         return True
+    
+    def is_error(self) -> bool:
+        """Verifica si el mensaje contiene un error"""
+        data = self.get_data()
+        if not data:
+            return False
+        try:
+            data_str = data.decode('utf-8', errors='ignore')
+            return data_str.startswith('E_') or 'ERROR' in data_str.upper()
+        except:
+            return False
+    
+    def get_error_code(self) -> int:
+        """Obtiene el código de error del mensaje"""
+        data = self.get_data()
+        if not data:
+            return 0
+        try:
+            data_str = data.decode('utf-8', errors='ignore')
+            if data_str.startswith('E_'):
+                # Intentar extraer código de error
+                error_part = data_str[2:]  # Remover 'E_'
+                if error_part.isdigit():
+                    return int(error_part)
+            return 0
+        except:
+            return 0
