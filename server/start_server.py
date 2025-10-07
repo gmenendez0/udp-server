@@ -1,6 +1,6 @@
 from . import rdt_server
 import argparse
-from protocol.rdt.rdt_connection import MemoryRdtConnectionRepository
+from server.rdt_connection import MemoryRdtConnectionRepository
 
 def parse_args():
     parser = argparse.ArgumentParser(prog="start-server", description="File transfer UDP server")

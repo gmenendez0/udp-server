@@ -14,25 +14,17 @@ from pathlib import Path
 from protocol.rdt.rdt_message import RdtMessage, RdtRequest
 from protocol.dp.dp_request import DPRequest
 from protocol import FunctionFlag
-# ================================[CONSTANTES DEL PROTOCOLO]===============================
-# Códigos de error
-ERR_TOO_BIG = 1          # Archivo excede el tamaño máximo
-ERR_NOT_FOUND = 2        # Archivo no encontrado
-ERR_BAD_REQUEST = 3      # Solicitud malformada
-ERR_PERMISSION_DENIED = 4 # Permisos insuficientes
-ERR_NETWORK_ERROR = 5    # Error de red
-ERR_TIMEOUT_ERROR = 6    # Timeout
-ERR_INVALID_PROTOCOL = 7 # Protocolo no soportado
-ERR_SERVER_ERROR = 8     # Error interno del servidor
 
-# Constantes de protocolo
+# Importar constantes desde constants.py
+from .constants import (
+    FLAG_DATA, FLAG_ACK, FLAG_LAST,
+    ERR_TOO_BIG, ERR_NOT_FOUND, ERR_BAD_REQUEST, ERR_PERMISSION_DENIED,
+    ERR_NETWORK_ERROR, ERR_TIMEOUT_ERROR, ERR_INVALID_PROTOCOL, ERR_SERVER_ERROR,
+    get_error_message
+)
+
+# Constantes específicas de este módulo
 PROTO_STOP_WAIT, PROTO_GBN = 0, 1
-
-# Tipos de mensaje y flags 
-FLAG_HANDSHAKE = 0
-FLAG_ACK = 1
-FLAG_DATA = 2
-FLAG_LAST = 3
 
 # Constantes TLV
 TLV_FILENAME = 0x01
@@ -48,28 +40,6 @@ OP_REQUEST_UPLOAD, OP_UPLOAD_ACCEPTED = 0x01, 0x02
 OP_DOWNLOAD_ACCEPTED = 0x04
 OP_REQUEST_DOWNLOAD, OP_END_SESSION, OP_ERROR = 0x03, 0x10, 0x7F
 
-def get_error_message(error_code: int) -> str:
-    """
-    Obtiene el mensaje de error correspondiente al código.
-    
-    Args:
-        error_code (int): Código de error
-        
-    Returns:
-        str: Mensaje de error descriptivo
-    """
-    error_messages = {
-        ERR_TOO_BIG: "Archivo excede el tamaño máximo permitido",
-        ERR_NOT_FOUND: "Archivo no encontrado",
-        ERR_BAD_REQUEST: "Solicitud malformada",
-        ERR_PERMISSION_DENIED: "Permisos insuficientes",
-        ERR_NETWORK_ERROR: "Error de red",
-        ERR_TIMEOUT_ERROR: "Timeout en la operación",
-        ERR_INVALID_PROTOCOL: "Protocolo no soportado",
-        ERR_SERVER_ERROR: "Error interno del servidor"
-    }
-    return error_messages.get(error_code, f"Error desconocido (código: {error_code})")
-
 # Configurar logging
 logger = logging.getLogger(__name__)
 
@@ -78,7 +48,7 @@ BUFFER_SIZE = 2048
 HANDSHAKE_TIMEOUT = 5
 HANDSHAKE_MAX_ATTEMPTS = 3
 CHUNK_SIZE = 1024
-ACK_TIMEOUT = 2
+ACK_TIMEOUT = 5
 MAX_RETRIES = 5
 WINDOW_SIZE_GO_BACK_N = 5
 MAX_FILE_SIZE_MB = 5  # Según consigna del trabajo
@@ -118,7 +88,7 @@ class ConnectionState:
             RdtMessage: Mensaje de handshake formateado
         """
         handshake_msg = RdtMessage(
-            flag=FLAG_HANDSHAKE,
+            flag=FLAG_DATA,
             max_window=self.max_window,
             seq_num=self.client_seq_num,
             ref_num=self.client_ref_num,
@@ -167,10 +137,9 @@ class ConnectionState:
             self.server_ref_num = server_ref
             
             # Configurar mis números para la comunicación
-            # Mi próximo SEQ será el que el servidor espera (server_ref)
-            # Mi REF será el próximo que espero recibir del servidor (server_seq + 1)
-            self.client_seq_num = server_ref
-            self.client_ref_num = server_seq + 1
+            # Después del handshake, incremento mis números para la siguiente comunicación
+            self.client_seq_num += 1  # Próximo SEQ a usar
+            self.client_ref_num = server_seq + 1  # Próximo REF que espero del servidor
             
             self.handshake_completed = True
             logger.info(f"Handshake completado. Cliente configurado: SEQ={self.client_seq_num}, REF={self.client_ref_num}")

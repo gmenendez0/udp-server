@@ -3,9 +3,10 @@
 Constantes del cliente RDT.
 """
 
-# Constantes de protocolo
-T_DATA, T_ACK, T_GETDATA = 0x00, 0x01, 0x04
-F_LAST = 0x01
+# Constantes de protocolo RDT
+FLAG_DATA = 0
+FLAG_ACK = 1
+FLAG_LAST = 2
 
 # Códigos de error
 ERR_TOO_BIG = 1
@@ -41,8 +42,11 @@ def get_error_message(error_code: int) -> str:
     return ERROR_MESSAGES.get(error_code, f"Error desconocido (código: {error_code})")
 
 # Prefijos de mensajes
-PREFIX_UPLOAD = "U_"
+PREFIX_DATA = "D_"
+PREFIX_ERROR = "E_"
 PREFIX_DOWNLOAD = "D_"
+PREFIX_UPLOAD = "U_"
+
 def format_upload_request(filename: str, file_size: int) -> str:
     """
     Formatea un mensaje de solicitud de upload.
@@ -120,6 +124,15 @@ def validate_prefix(data: bytes, expected_prefix: str) -> tuple[bool, str]:
     if data.startswith(opposite_bytes):
         operation = "download" if expected_prefix == PREFIX_UPLOAD else "upload"
         return False, f"Error: recibido chunk de {operation} durante operación incorrecta"
+    
+    # Verificar si es un mensaje de error con PREFIX_ERROR
+    error_prefix_bytes = PREFIX_ERROR.encode('utf-8')
+    if data.startswith(error_prefix_bytes):
+        try:
+            error_text = data.decode('utf-8', errors='ignore')
+            return False, f"Error del servidor: {error_text}"
+        except:
+            return False, "Error del servidor: no se pudo parsear el mensaje de error"
     
     # Prefijo no reconocido, intentar parsear como error
     try:

@@ -12,7 +12,8 @@ import os
 
 # Importar constantes
 from .constants import (
-    T_DATA, T_ACK, T_GETDATA, F_LAST,
+    FLAG_DATA, FLAG_ACK, FLAG_LAST,
+    PREFIX_UPLOAD, PREFIX_DOWNLOAD, PREFIX_DATA, PREFIX_ERROR,
     ERR_TOO_BIG, ERR_NOT_FOUND, ERR_BAD_REQUEST, ERR_PERMISSION_DENIED,
     ERR_NETWORK_ERROR, ERR_TIMEOUT_ERROR, ERR_INVALID_PROTOCOL, ERR_SERVER_ERROR,
     get_error_message, format_upload_request, format_download_request,
@@ -69,7 +70,7 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str) -> 
         
         file_info = format_upload_request(filename, total_size)
         file_info_msg = RdtMessage(
-            flag=T_DATA,
+            flag=FLAG_DATA,
             max_window=window_size,
             seq_num=connection_state.get_next_sequence_number(),
             ref_num=connection_state.get_current_reference_number(),
@@ -126,18 +127,18 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str) -> 
 
             file_fully_read = False
             
-            while not file_fully_read or base < connection_state.get_next_sequence_number():
+            while not file_fully_read or base < next_seq_num:
                 
-                while connection_state.get_next_sequence_number() < base + window_size and not file_fully_read:
+                while next_seq_num < base + window_size and not file_fully_read:
                     chunk = file.read(CHUNK_SIZE)
                     if not chunk:
                         file_fully_read = True
                         break 
                     is_last_chunk = file.tell() >= total_size
-                    flag = F_LAST if is_last_chunk else T_DATA
+                    flag = FLAG_LAST if is_last_chunk else FLAG_DATA
 
-                    chunk_with_prefix = format_chunk_data("U_", chunk)
-                    current_seq = connection_state.get_next_sequence_number()
+                    chunk_with_prefix = format_chunk_data(PREFIX_DATA, chunk)
+                    current_seq = next_seq_num
                     rdt_msg = RdtMessage(
                         flag=flag, max_window=window_size,
                         seq_num=current_seq,
@@ -148,7 +149,7 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str) -> 
                     sent_packets[current_seq] = rdt_msg.to_bytes()
                     client.send(sent_packets[current_seq])
                     logger.info(f"Enviado chunk seq={current_seq} (ventana: [{base}, {base+window_size-1}])")
-                    connection_state.increment_sequence_number()
+                    next_seq_num += 1
                 
                 data, _, close_signal = client.receive()
                 
@@ -159,8 +160,9 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str) -> 
                 if not data:
                     logger.warning(f"Timeout! Retransmitiendo ventana desde base={base}")
                     client.stats['retransmissions'] += 1
-                    for i in range(base, connection_state.get_next_sequence_number()):
-                        client.send(sent_packets[i])
+                    for i in range(base, next_seq_num):
+                        if i in sent_packets:
+                            client.send(sent_packets[i])
                     continue
 
                 try:
@@ -225,7 +227,7 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str) -
 
         download_request = format_download_request(filename)
         request_msg = RdtMessage(
-            flag=T_DATA, 
+            flag=FLAG_DATA, 
             max_window=connection_state.get_max_window(),
             seq_num=connection_state.get_next_sequence_number(),
             ref_num=connection_state.get_current_reference_number(),
@@ -281,6 +283,8 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str) -
         
         expected_seq_num = 0
         file_data = b''
+        received_packets = {}  # Buffer para paquetes fuera de orden
+        window_size = connection_state.get_max_window()
         
         while True:
             data, _, close_signal = client.receive()
@@ -298,48 +302,43 @@ def handle_download_go_back_n(path: Path, host: str, port: int, filename: str) -
                 seq_num = rdt_response.get_seq_num()
                 logger.info(f"Recibido chunk con seq={seq_num}. Se esperaba seq={expected_seq_num}.")
 
-                if seq_num == expected_seq_num:
+                # Verificar si el paquete está en la ventana de recepción
+                if expected_seq_num <= seq_num < expected_seq_num + window_size:
                     chunk_data = rdt_response.get_data()
-                    is_valid, error_msg = validate_prefix(chunk_data, "D_")
+                    is_valid, error_msg = validate_prefix(chunk_data, PREFIX_DATA)
                     
                     if is_valid:
-                        chunk_data = remove_prefix(chunk_data, "D_")
-                        file_data += chunk_data
-                    else:
-                        logger.error(error_msg)
-                        return False
-                    
-                    ack_msg = RdtMessage(
-                        flag=T_ACK,
-                        max_window=connection_state.get_max_window(),
-                        seq_num=expected_seq_num,
-                        ref_num=expected_seq_num + 1,
-                        data=b''
-                    )
-                    client.send(ack_msg.to_bytes())
-                    logger.info(f"Enviado ACK para seq={expected_seq_num}")
-                    
-                    if rdt_response.is_last():
-                        logger.info("Recibido último paquete")
-                        break
-                    
-                    expected_seq_num += 1
-
-                else:
-                    logger.warning(f"Paquete fuera de orden/duplicado (seq={seq_num}). Descartado.")
-                    client.stats['errors'] += 1
-
-                    if expected_seq_num > 0:
-                        last_acked_seq = expected_seq_num - 1
+                        chunk_data = remove_prefix(chunk_data, PREFIX_DATA)
+                        received_packets[seq_num] = chunk_data
+                        
+                        # Procesar paquetes en orden
+                        while expected_seq_num in received_packets:
+                            file_data += received_packets[expected_seq_num]
+                            del received_packets[expected_seq_num]
+                            
+                            if rdt_response.is_last() and seq_num == expected_seq_num:
+                                logger.info("Recibido último paquete")
+                                return True
+                            
+                            expected_seq_num += 1
+                        
+                        # Enviar ACK acumulativo
                         ack_msg = RdtMessage(
-                            flag=T_ACK,
+                            flag=FLAG_ACK,
                             max_window=connection_state.get_max_window(),
-                            seq_num=last_acked_seq,
-                            ref_num=last_acked_seq + 1,
+                            seq_num=expected_seq_num - 1,
+                            ref_num=expected_seq_num,
                             data=b''
                         )
                         client.send(ack_msg.to_bytes())
-                        logger.info(f"Reenviando ACK para seq={last_acked_seq}")
+                        logger.info(f"Enviado ACK acumulativo para seq={expected_seq_num - 1}")
+                        
+                    else:
+                        logger.error(error_msg)
+                        return False
+                else:
+                    logger.warning(f"Paquete fuera de ventana (seq={seq_num}, ventana=[{expected_seq_num}, {expected_seq_num + window_size - 1}]). Descartado.")
+                    client.stats['errors'] += 1
                         
             except Exception as e:
                 logger.error(f"Error parseando paquete: {e}")

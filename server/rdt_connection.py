@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from queue import Queue, Empty
 
 from server.file_helpers import get_file_size_in_bytes, get_file_in_chunks, append_bytes_to_file
-from .rdt_message import RdtRequest, RdtResponse
+from protocol.rdt.rdt_message import RdtRequest, RdtResponse
 from typing import Optional, Dict, List
 import time
 import logging
@@ -14,12 +14,16 @@ import socket
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+SERVER_SEQ_NUM_START = 0
 CONNECTION_TIMEOUT = 7.0            # Segundos de timeout de conexión
 STORAGE_PATH = "files"
 MAX_FILE_SIZE = 5_500_000           # 5.5MB
 RETRANSMISSION_TIMEOUT = 2.0        # Segundos para el timeout de retransmisión
 MAX_RETRANSMISSION_ATTEMPTS = 5     # Máximo de intentos de retransmisión
 CHUNK_SIZE = 1024                   # Leer archivo en chunks de 1KB
+UPLOAD_COMMAND = 'U'
+DOWNLOAD_COMMAND = 'D'
+FAST_RETRANSMIT_THRESHOLD = 3       # Número de ACKs duplicados para activar fast retransmit
 
 class RdtConnection:
     def __init__(self, address: str):
@@ -41,11 +45,13 @@ class RdtConnection:
         self.bytes_received             : Optional[int]     = None
         self.pending_data_chunks        : List[bytes]       = []
 
-        self.next_seq                   : Optional[int]     = 0
         self.base_seq                   : Optional[int]     = 0
 
         self.retransmission_timer       : Optional[threading.Timer] = None
         self.retransmission_attempts    : int = 0
+
+        self.duplicate_ack_count        : int = 0
+        self.last_ack_num               : Optional[int] = None
 
     def add_request(self, data: bytes) -> None:
         self.request_queue.put(data)
@@ -56,6 +62,8 @@ class RdtConnection:
         while not self.request_queue.empty():
             self.request_queue.get_nowait()
         self.is_active = False
+
+        self._stop_retransmission_timer()
 
         logger.info(f"Conexión {self.address} cerrada")
 
@@ -94,11 +102,6 @@ class RdtConnection:
 
     def _handle_handshake_message(self, rdt_request: RdtRequest) -> None:
         """Maneja mensajes de handshake"""
-        if not rdt_request.is_handshake():
-            logger.warning(f"Se esperaba mensaje de handshake (FLAG=0) de {self.address}, se recibió FLAG={rdt_request.message.flag}. Ignorando.")
-            self.shutdown()
-            return
-
         if not rdt_request.is_valid_handshake_message():
             logger.error(f"Request de handshake inválido de {self.address}. Ignorando.")
             self.shutdown()
@@ -108,7 +111,7 @@ class RdtConnection:
 
         self.max_window = rdt_request.get_max_window()
         self.ref_num = rdt_request.get_seq_num() + 1
-        self.seq_num = rdt_request.get_seq_num()
+        self.seq_num = SERVER_SEQ_NUM_START
 
         self._send_handshake_ack()
         self.connection_established = True
@@ -126,10 +129,10 @@ class RdtConnection:
         parts = data.split()
         command = parts[0]
 
-        if command == 'D':
+        if command == DOWNLOAD_COMMAND:
             filename = parts[1]
             self._handle_download_request(filename, rdt_request)
-        if command == 'U':
+        elif command == UPLOAD_COMMAND:
             filename = parts[1]
             filesize = int(parts[2])
             self._handle_upload_request(filename, filesize, rdt_request)
@@ -142,17 +145,17 @@ class RdtConnection:
         self._send_ack_response(rdt_request.get_seq_num() + 1)
 
         filepath = os.path.join(STORAGE_PATH, filename)
-        filesize = get_file_size_in_bytes(filepath)
+        file_already_exists = get_file_size_in_bytes(filepath) is not None
+
+        if file_already_exists:
+            logger.error(f"Archivo {filename} ya existe para {self.address}")
+            self._send_error_response(b'FILE_ALREADY_EXISTS')
+            self.shutdown()
+            return
 
         if filesize > MAX_FILE_SIZE:
             logger.error(f"Archivo {filename} demasiado grande ({filesize}) para {self.address}")
             self._send_error_response(b'FILE_TOO_LARGE')
-            self.shutdown()
-            return
-
-        if os.path.isfile(filepath):
-            logger.error(f"Archivo {filename} ya existe para {self.address}")
-            self._send_error_response(b'FILE_ALREADY_EXISTS')
             self.shutdown()
             return
 
@@ -222,14 +225,14 @@ class RdtConnection:
             self._send_response(response.message.to_bytes())
 
             self.packets_on_fly.append(response)
-            self.next_seq += 1
+            self.seq_num += 1
             self.bytes_sent += len(chunk)
             packets_sent += 1
 
             logger.info(f"Paquete enviado a {self.address} con seq_num {self.seq_num}. Total bytes enviados: {self.bytes_sent}/{self.current_filesize}")
 
         if packets_sent > 0 and self.retransmission_timer is None:
-            self.start_retransmission_timer()
+            self._start_retransmission_timer()
 
     def _handle_ack_message(self, rdt_request: RdtRequest) -> None:
         ack_num = rdt_request.get_ref_num()
@@ -246,35 +249,66 @@ class RdtConnection:
 
                 # Reiniciamos el contador de reintentos
                 self.retransmission_attempts = 0
+                self.duplicate_ack_count = 0
+                self.last_ack_num = ack_num
 
                 # Frenamos el timer y si quedan paquetes en vuelo, lo iniciamos otra vez
-                self.stop_retransmission_timer()
+                self._stop_retransmission_timer()
                 if len(self.packets_on_fly) > 0:
-                    self.start_retransmission_timer()
+                    self._start_retransmission_timer()
 
                 # Enviamos más paquetes si hay espacio en la ventana
                 self._send_window_packages()
+            elif ack_num == self.base_seq and ack_num == self.last_ack_num:
+                self.duplicate_ack_count += 1
+                logger.warning(f"ACK duplicado (>1) recibido de {self.address} con ref_num {ack_num}. Contador de duplicados: {self.duplicate_ack_count}")
+
+                if self.duplicate_ack_count >= FAST_RETRANSMIT_THRESHOLD:
+                    self._fast_retransmit()
+            elif ack_num == self.base_seq:
+                logger.warning(f"Primer ACK duplicado recibido de {self.address} con ref_num {ack_num}.")
+                self.duplicate_ack_count = 1
+                self.last_ack_num = ack_num
             else:
-                logger.warning(f"ACK duplicado o fuera de orden recibido de {self.address} con ref_num {ack_num}. Ignorando.")
+                logger.warning(f"ACK fuera de orden recibido de {self.address} con ref_num {ack_num}. Ignorando")
 
-        # Si no quedan paquetes en vuelo y no hay más datos por enviar, cerrar conexión
-        if len(self.packets_on_fly) == 0 and len(self.pending_data_chunks) == 0:
-            logger.info(f"Todos los datos enviados y ACKs recibidos para {self.address}. Cerrando conexión.")
-            self.shutdown()
 
-    def start_retransmission_timer(self) -> None:
+            # Si no quedan paquetes en vuelo y no hay más datos por enviar, cerrar conexión
+            if len(self.packets_on_fly) == 0 and len(self.pending_data_chunks) == 0:
+                logger.info(f"Todos los datos enviados y ACKs recibidos para {self.address}. Cerrando conexión.")
+                self.shutdown()
+
+    def _fast_retransmit(self) -> None:
+        logger.info(f"Fast retransmit activado para {self.address}.")
+
+        # Reiniciar contador de ACKs duplicados
+        self.duplicate_ack_count = 0
+
+        # Retransmitir todos los paquetes en vuelo
+        for packet in self.packets_on_fly:
+            self._send_response(packet.message.to_bytes())
+            logger.info(f"Paquete retransmitido a {self.address} con seq_num {packet.message.seq_num}")
+
+        # Frenar el timer
+        self._stop_retransmission_timer()
+
+        # Si quedan paquetes en vuelo, reiniciar el timer
+        if len(self.packets_on_fly) > 0:
+            self._start_retransmission_timer()
+
+    def _start_retransmission_timer(self) -> None:
         if self.retransmission_timer:
             self.retransmission_timer.cancel()
 
-        self.retransmission_timer = threading.Timer(RETRANSMISSION_TIMEOUT, self.handle_retransmission_timeout)
+        self.retransmission_timer = threading.Timer(RETRANSMISSION_TIMEOUT, self._handle_retransmission_timeout)
         self.retransmission_timer.start()
 
-    def stop_retransmission_timer(self) -> None:
+    def _stop_retransmission_timer(self) -> None:
         if self.retransmission_timer:
             self.retransmission_timer.cancel()
             self.retransmission_timer = None
 
-    def handle_retransmission_timeout(self) -> None:
+    def _handle_retransmission_timeout(self) -> None:
         if not self.is_active or self.current_operation != "DOWNLOAD":
             return
 
@@ -295,12 +329,13 @@ class RdtConnection:
                 logger.info(f"Paquete retransmitido a {self.address} con seq_num {packet.message.seq_num}")
 
             # Reiniciar el timer
-            self.start_retransmission_timer()
+            self._start_retransmission_timer()
         else:
             logger.warning(f"No hay paquetes para retransmitir a {self.address}.")
 
     def _send_ack_response(self, ref_num: int) -> None:
-        ack_response = RdtResponse.new_ack_response(self.max_window, self.seq_num, ref_num)
+        self.ref_num = ref_num
+        ack_response = RdtResponse.new_ack_response(self.max_window, self.seq_num, self.ref_num)
         self._send_response(ack_response.message.to_bytes())
         self.seq_num += 1
         logger.info(f"ACK enviado a {self.address} con ref_num {ref_num}")
@@ -321,6 +356,7 @@ class RdtConnection:
         host, port = self.address.split(":")
         skt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         skt.sendto(data, (host, int(port)))
+        skt.close()
 
 # ================================[REPOSITORIO ABSTRACTO]===============================
 class RdtConnectionRepository(ABC):
