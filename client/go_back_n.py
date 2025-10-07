@@ -240,7 +240,7 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str, max
                             for i in range(base, ack_num + 1):
                                 if i in sent_packets:
                                     del sent_packets[i]
-                            base = ack_num + 1
+                            base = ack_num 
                             connection_state.update_reference_number(ack_num + 1)
                             logger.info(f"Ventana deslizada. Nueva base={base}")
                             
