@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 # Constantes del protocolo
 BUFFER_SIZE = 2048
-HANDSHAKE_TIMEOUT = 5
+HANDSHAKE_TIMEOUT = 6
 HANDSHAKE_MAX_ATTEMPTS = 3
 CHUNK_SIZE = 1024
 ACK_TIMEOUT = 5

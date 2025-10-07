@@ -15,10 +15,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 SERVER_SEQ_NUM_START = 0
-CONNECTION_TIMEOUT = 7.0            # Segundos de timeout de conexión
+CONNECTION_TIMEOUT = 30.0          # Segundos de timeout de conexión
 STORAGE_PATH = "files"
 MAX_FILE_SIZE = 5_500_000           # 5.5MB
-RETRANSMISSION_TIMEOUT = 2.0        # Segundos para el timeout de retransmisión
+RETRANSMISSION_TIMEOUT = 2.0      # Segundos para el timeout de retransmisión
 MAX_RETRANSMISSION_ATTEMPTS = 5     # Máximo de intentos de retransmisión
 CHUNK_SIZE = 1024                   # Leer archivo en chunks de 1KB
 UPLOAD_COMMAND = 'U'
@@ -48,7 +48,7 @@ class RdtConnection:
         self.base_seq                   : Optional[int]     = 0
 
         self.retransmission_timer       : Optional[threading.Timer] = None
-        self.retransmission_attempts    : int = 0
+        self.retransmission_attempts    : int = 3
 
         self.duplicate_ack_count        : int = 0
         self.last_ack_num               : Optional[int] = None
@@ -71,7 +71,7 @@ class RdtConnection:
         logger.info(f"Iniciando procesamiento de conexión para {self.address}")
         
         while self.is_active:
-            # Verificar timeout
+            # Verificar timeout de cliente idle
             if time.time() - self.last_activity > CONNECTION_TIMEOUT:
                 logger.warning(f"Timeout de conexión para {self.address}")
                 self.shutdown()
@@ -123,8 +123,8 @@ class RdtConnection:
 
     def _handle_data_message(self, rdt_request: RdtRequest) -> None:
         data = rdt_request.get_data().decode('utf-8')
-        logger.info(f"Datos recibidos de {self.address}: {data}")
-
+        #logger.info(f"Datos recibidos de {self.address}: {data}")
+        logger.info(f"Datos recibidos de {self.address} con seq_num {rdt_request.get_seq_num()}")
         # Determinar operacion a ejecutar
         parts = data.split()
 
@@ -194,7 +194,7 @@ class RdtConnection:
         self._send_ack_response(rdt_request.get_seq_num() + 1)
 
         # Verificar si la transferencia está completa. En caso que si, cerrar la conexion
-        if rdt_request.is_last() or self.bytes_received >= self.current_filesize:
+        if rdt_request.is_last():
             logger.info(f"Archivo {self.current_filename} recibido completamente de {self.address}")
             self.shutdown()
 
