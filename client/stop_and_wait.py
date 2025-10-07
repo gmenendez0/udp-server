@@ -102,7 +102,7 @@ def handle_upload_stop_and_wait(path: Path, host: str, port: int, filename: str,
             
             if rdt_response.is_ack():
                 # Para el mensaje inicial, el servidor debe confirmar nuestro seq_num
-                expected_ref_num = connection_state.get_next_sequence_number()
+                expected_ref_num = connection_state.get_next_sequence_number() + 1
                 if rdt_response.get_ref_num() == expected_ref_num:
                     logger.info("ACK recibido para mensaje inicial")
                     connection_state.update_reference_number(rdt_response.get_ref_num())
@@ -138,11 +138,11 @@ def handle_upload_stop_and_wait(path: Path, host: str, port: int, filename: str,
                     client.send(rdt_msg.to_bytes())
                     logger.info(f"Enviado chunk seq={current_seq} ({current_chunk}/{total_chunks}), esperando ACK...")
                     
+
+
                     data, _, close_signal = client.receive()
                     
-                    if close_signal:
-                        logger.info("Servidor solicitó cerrar la conexión.")
-                        return True
+                    
                     
                     if not data:
                         logger.warning(f"Timeout esperando ACK para chunk seq={current_seq}")
@@ -158,7 +158,7 @@ def handle_upload_stop_and_wait(path: Path, host: str, port: int, filename: str,
                             logger.error(f"Error del servidor: {get_error_message(error_code)}")
                             return False
                         
-                        expected_ref_num = current_seq
+                        expected_ref_num = current_seq + 1
                         if rdt_response.is_ack() and rdt_response.get_ref_num() == expected_ref_num:
                             logger.info(f"ACK recibido para chunk seq={current_seq}")
                             success = True
@@ -166,8 +166,11 @@ def handle_upload_stop_and_wait(path: Path, host: str, port: int, filename: str,
                             connection_state.increment_sequence_number()
                         else:
                             logger.warning(f"ACK inválido para chunk seq={current_seq}")
+                            print(f'expected_ref_num: {expected_ref_num}, rdt_response.is_ack(): {rdt_response.is_ack()}, rdt_response.get_ref_num(): {rdt_response.get_ref_num()}')
                             retries += 1
                             client.stats['errors'] += 1
+
+    
                             
                     except Exception as e:
                         logger.error(f"Error parseando ACK: {e}")

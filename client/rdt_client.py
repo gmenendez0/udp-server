@@ -129,7 +129,8 @@ class ConnectionState:
                 return False
                 
             # El servidor debe confirmar nuestro seq_num con su ref_num
-            if server_ref != self.client_seq_num:
+            
+            if server_ref != (self.client_seq_num + 1):
                 logger.error(f"Server REF incorrecto: {server_ref}, esperado: {self.client_seq_num}")
                 return False
             
