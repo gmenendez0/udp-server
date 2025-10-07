@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Tuple, Optional
 from protocol.rdt.rdt_message import RdtMessage, RdtRequest
 from .rdt_client import RdtClient, CHUNK_SIZE, MAX_RETRIES, validate_file_size, MAX_FILE_SIZE_MB
+from server.file_helpers import get_file_in_chunks
 import os
 
 # Importar constantes
@@ -176,33 +177,37 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str, max
             logger.error(f"Error parseando confirmación del servidor: {e}")
             return False
 
-        with open(path, "rb") as file:
-
-            file_fully_read = False
+        file_chunks = get_file_in_chunks(str(path), CHUNK_SIZE)
+        total_chunks = len(file_chunks)
+        
+        file_fully_read = False
+        current_chunk_index = 0
+        
+        while not file_fully_read or base < next_seq_num:
             
-            while not file_fully_read or base < next_seq_num:
-                
-                while next_seq_num < base + window_size and not file_fully_read:
-                    chunk = file.read(CHUNK_SIZE)
-                    if not chunk:
-                        file_fully_read = True
-                        break 
-                    is_last_chunk = file.tell() >= total_size
-                    flag = FLAG_LAST if is_last_chunk else FLAG_DATA
-
-                    chunk_with_prefix = format_chunk_data(PREFIX_DATA, chunk)
-                    current_seq = next_seq_num
-                    rdt_msg = RdtMessage(
-                        flag=flag, max_window=window_size,
-                        seq_num=current_seq,
-                        ref_num=connection_state.get_current_reference_number(),
-                        data=chunk_with_prefix
-                    )
+            while next_seq_num < base + window_size and not file_fully_read:
+                if current_chunk_index >= total_chunks:
+                    file_fully_read = True
+                    break
                     
-                    sent_packets[current_seq] = rdt_msg.to_bytes()
-                    client.send(sent_packets[current_seq])
-                    logger.info(f"Enviado chunk seq={current_seq} (ventana: [{base}, {base+window_size-1}])")
-                    next_seq_num += 1
+                chunk = file_chunks[current_chunk_index]
+                is_last_chunk = current_chunk_index == total_chunks - 1
+                flag = FLAG_LAST if is_last_chunk else FLAG_DATA
+
+                chunk_with_prefix = format_chunk_data(PREFIX_DATA, chunk)
+                current_seq = next_seq_num
+                rdt_msg = RdtMessage(
+                    flag=flag, max_window=window_size,
+                    seq_num=current_seq,
+                    ref_num=connection_state.get_current_reference_number(),
+                    data=chunk_with_prefix
+                )
+                
+                sent_packets[current_seq] = rdt_msg.to_bytes()
+                client.send(sent_packets[current_seq])
+                logger.info(f"Enviado chunk seq={current_seq} (ventana: [{base}, {base+window_size-1}])")
+                next_seq_num += 1
+                current_chunk_index += 1
                 
                 data, _, close_signal = client.receive()
                 

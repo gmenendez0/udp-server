@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Tuple, Optional
 from protocol.rdt.rdt_message import RdtMessage, RdtRequest
 from .rdt_client import RdtClient, CHUNK_SIZE, MAX_RETRIES, validate_file_size, MAX_FILE_SIZE_MB
+from server.file_helpers import get_file_in_chunks
 import os
 
 # Importar constantes
@@ -166,71 +167,70 @@ def handle_upload_stop_and_wait(path: Path, host: str, port: int, filename: str,
             logger.error(f"Error parseando confirmación del servidor: {e}")
             return False
         
-        with open(path, "rb") as file:
-            while chunk := file.read(CHUNK_SIZE):
-                success = False
-                retries = 0
-                is_last_chunk = current_chunk == total_chunks
+        file_chunks = get_file_in_chunks(str(path), CHUNK_SIZE)
+        total_chunks = len(file_chunks)
+        
+        for current_chunk in range(1, total_chunks + 1):
+            chunk = file_chunks[current_chunk - 1]
+            success = False
+            retries = 0
+            is_last_chunk = current_chunk == total_chunks
+            
+            while not success and retries < MAX_RETRIES:
+                flag = FLAG_LAST if is_last_chunk else FLAG_DATA
+                chunk_with_prefix = format_chunk_data(PREFIX_DATA, chunk)
+                current_seq = connection_state.get_next_sequence_number()
+                rdt_msg = RdtMessage(
+                    flag=flag,
+                    max_window=connection_state.get_max_window(),
+                    seq_num=current_seq,
+                    ref_num=connection_state.get_current_reference_number(),
+                    data=chunk_with_prefix
+                )
                 
-                while not success and retries < MAX_RETRIES:
-                    flag = FLAG_LAST if is_last_chunk else FLAG_DATA
-                    chunk_with_prefix = format_chunk_data(PREFIX_DATA, chunk)
-                    current_seq = connection_state.get_next_sequence_number()
-                    rdt_msg = RdtMessage(
-                        flag=flag,
-                        max_window=connection_state.get_max_window(),
-                        seq_num=current_seq,
-                        ref_num=connection_state.get_current_reference_number(),
-                        data=chunk_with_prefix
-                    )
+                client.send(rdt_msg.to_bytes())
+                logger.info(f"Enviado chunk seq={current_seq} ({current_chunk}/{total_chunks}), esperando ACK...")
+                
+                data, _, close_signal = client.receive()
+                
+                if close_signal:
+                    logger.info("Servidor solicitó cerrar la conexión.")
+                    return True
+                
+                if not data:
+                    logger.warning(f"Timeout esperando ACK para chunk seq={current_seq}")
+                    retries += 1
+                    client.stats['retransmissions'] += 1
+                    continue
+                
+                try:
+                    rdt_response = RdtRequest(address=f"{host}:{port}", request=data)
                     
-                    client.send(rdt_msg.to_bytes())
-                    logger.info(f"Enviado chunk seq={current_seq} ({current_chunk}/{total_chunks}), esperando ACK...")
+                    if rdt_response.is_error():
+                        error_code = rdt_response.get_error_code()
+                        logger.error(f"Error del servidor: {get_error_message(error_code)}")
+                        return False
                     
-
-
-                    data, _, close_signal = client.receive()
-                    
-                    
-                    
-                    if not data:
-                        logger.warning(f"Timeout esperando ACK para chunk seq={current_seq}")
-                        retries += 1
-                        client.stats['retransmissions'] += 1
-                        continue
-                    
-                    try:
-                        rdt_response = RdtRequest(address=f"{host}:{port}", request=data)
-                        
-                        if rdt_response.is_error():
-                            error_code = rdt_response.get_error_code()
-                            logger.error(f"Error del servidor: {get_error_message(error_code)}")
-                            return False
-                        
-                        expected_ref_num = current_seq + 1
-                        if rdt_response.is_ack() and rdt_response.get_ref_num() == expected_ref_num:
-                            logger.info(f"ACK recibido para chunk seq={current_seq}")
-                            success = True
-                            connection_state.update_reference_number(rdt_response.get_ref_num())
-                            connection_state.increment_sequence_number()
-                        else:
-                            logger.warning(f"ACK inválido para chunk seq={current_seq}")
-                            print(f'expected_ref_num: {expected_ref_num}, rdt_response.is_ack(): {rdt_response.is_ack()}, rdt_response.get_ref_num(): {rdt_response.get_ref_num()}')
-                            retries += 1
-                            client.stats['errors'] += 1
-
-    
-                            
-                    except Exception as e:
-                        logger.error(f"Error parseando ACK: {e}")
+                    expected_ref_num = current_seq + 1
+                    if rdt_response.is_ack() and rdt_response.get_ref_num() == expected_ref_num:
+                        logger.info(f"ACK recibido para chunk seq={current_seq}")
+                        success = True
+                        connection_state.update_reference_number(rdt_response.get_ref_num())
+                        connection_state.increment_sequence_number()
+                    else:
+                        logger.warning(f"ACK inválido para chunk seq={current_seq}")
+                        print(f'expected_ref_num: {expected_ref_num}, rdt_response.is_ack(): {rdt_response.is_ack()}, rdt_response.get_ref_num(): {rdt_response.get_ref_num()}')
                         retries += 1
                         client.stats['errors'] += 1
-                
-                if not success:
-                    logger.error(f"No se recibió ACK después de {MAX_RETRIES} intentos. Abortando.")
-                    return False
-                
-                current_chunk += 1
+                            
+                except Exception as e:
+                    logger.error(f"Error parseando ACK: {e}")
+                    retries += 1
+                    client.stats['errors'] += 1
+            
+            if not success:
+                logger.error(f"No se recibió ACK después de {MAX_RETRIES} intentos. Abortando.")
+                return False
         
         # Mostrar estadísticas
         stats = client.get_stats()
