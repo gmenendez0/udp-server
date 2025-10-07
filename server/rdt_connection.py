@@ -54,6 +54,7 @@ class RdtConnection:
         self.last_ack_num               : Optional[int] = None
 
         self.guido                      : int = 0
+        self.uploaded_bytes             : bytes = b""
 
     def add_request(self, data: bytes) -> None:
         self.request_queue.put(data)
@@ -182,12 +183,11 @@ class RdtConnection:
 
     def _handle_upload_data(self, rdt_request: RdtRequest) -> None:
         # Obtener la data del archivo
+        self.guido += 1
         data = rdt_request.get_data()
         
-        # Appendear los bytes al archivo
-        filepath = os.path.join(STORAGE_PATH, self.current_filename)
-        self.guido += 1
-        append_bytes_to_file(filepath, data)
+        # Appendear los bytes a uploaded_bytes
+        self.uploaded_bytes = self.uploaded_bytes + data
 
         # Actualizar el contador de bytes recibidos
         self.bytes_received += len(data)
@@ -200,6 +200,8 @@ class RdtConnection:
         if rdt_request.is_last():
             print(f"Guido: {self.guido}")
             logger.info(f"Archivo {self.current_filename} recibido completamente de {self.address}")
+            append_bytes_to_file(os.path.join(STORAGE_PATH, self.current_filename), self.uploaded_bytes)
+            logger.info(f"Archivo {self.current_filename} guardado completamente de {self.address}")
             self.shutdown()
 
     def _handle_download_request(self, filename: str, rdt_request: RdtRequest) -> None:
