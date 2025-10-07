@@ -28,11 +28,11 @@ ERR_SERVER_ERROR = 8     # Error interno del servidor
 # Constantes de protocolo
 PROTO_STOP_WAIT, PROTO_GBN = 0, 1
 
-# Tipos de mensaje y flags (consistentes con el servidor)
-# El servidor usa: FLAG_ACK = 1, FLAG_DATA = 0, FLAG_LAST = 2
-FLAG_ACK = 1        # Para ACK
-FLAG_DATA = 0       # Para datos
-FLAG_LAST = 2       # Para último paquete
+# Tipos de mensaje y flags 
+FLAG_HANDSHAKE = 0
+FLAG_ACK = 1
+FLAG_DATA = 2
+FLAG_LAST = 3
 
 # Constantes TLV
 TLV_FILENAME = 0x01
@@ -83,50 +83,54 @@ MAX_RETRIES = 5
 WINDOW_SIZE_GO_BACK_N = 5
 MAX_FILE_SIZE_MB = 5  # Según consigna del trabajo
 
-
-class RdtHandshake:
+class ConnectionState:
     """
-    Maneja el protocolo de handshake RDT.
+    Maneja todo el estado de la conexión RDT, incluyendo handshake y comunicación.
+    Gestiona sequence numbers y reference numbers de forma unificada.
     """
     
     def __init__(self, max_window: int = 1):
         """
-        Inicializa el handshake.
+        Inicializa el estado de la conexión.
         
         Args:
-            max_window (int): Tamaño máximo de ventana (1 = stop and wait, 2-9 = go back N)
+            max_window (int): Tamaño máximo de ventana
         """
-        if max_window < 1 or max_window > 9:
-            raise ValueError("max_window debe estar entre 1 y 9")
+        if max_window < 1:
+            raise ValueError("max_window debe ser mayor o igual a 1")
         
         self.max_window = max_window
-        self.sequence_number = 0  # Comenzamos en 0 por simplicidad
-        self.reference_number = 0  # En handshake se envía 0 y se ignora
         self.handshake_completed = False
-        self.server_sequence_number: Optional[int] = None
-        self.server_reference_number: Optional[int] = None
+        
+        # Números del cliente (mis números)
+        self.client_seq_num = 0  # Comenzamos en 0 para handshake
+        self.client_ref_num = 0  # En handshake se envía 0 y se ignora
+        
+        # Números del servidor (se configuran después del handshake)
+        self.server_seq_num: Optional[int] = None
+        self.server_ref_num: Optional[int] = None
     
     def create_handshake_request(self) -> RdtMessage:
         """
-        Crea el mensaje de handshake inicial usando RdtMessage.
+        Crea el mensaje de handshake inicial.
         
         Returns:
             RdtMessage: Mensaje de handshake formateado
         """
         handshake_msg = RdtMessage(
-            flag=FLAG_DATA,
+            flag=FLAG_HANDSHAKE,
             max_window=self.max_window,
-            seq_num=self.sequence_number,
-            ref_num=self.reference_number,
+            seq_num=self.client_seq_num,
+            ref_num=self.client_ref_num,
             data=b''
         )
         
-        logger.info(f"Creando handshake request: window={self.max_window}, seq={self.sequence_number}")
+        logger.info(f"Creando handshake request: window={self.max_window}, seq={self.client_seq_num}")
         return handshake_msg
     
-    def parse_handshake_response(self, rdt_request: RdtRequest) -> bool:
+    def process_handshake_response(self, rdt_request: RdtRequest) -> bool:
         """
-        Parsea la respuesta del servidor al handshake.
+        Procesa la respuesta del servidor al handshake.
         
         Args:
             rdt_request (RdtRequest): Respuesta del servidor
@@ -135,49 +139,72 @@ class RdtHandshake:
             bool: True si el handshake fue exitoso, False en caso contrario
         """
         try:
-            if rdt_request.message.flag != FLAG_ACK:
-                logger.error(f"Flag incorrecto del servidor: {rdt_request.message.flag}, esperado: {FLAG_ACK} (ACK)")
-                return False
+            # Validar que es un ACK
             if not rdt_request.is_ack():
-                logger.error("El servidor no envió un ACK")
+                logger.error(f"Servidor no envió ACK. Flag recibido: {rdt_request.message.flag}")
                 return False
             
+            # Validar max_window
             if rdt_request.get_max_window() != self.max_window:
                 logger.error(f"Max window no coincide: {rdt_request.get_max_window()}, esperado: {self.max_window}")
                 return False
             
-            self.server_sequence_number = rdt_request.get_seq_num()
-            self.server_reference_number = rdt_request.get_ref_num()
-            self.reference_number = rdt_request.get_seq_num() + 1
+            # Obtener números del servidor
+            server_seq = rdt_request.get_seq_num()
+            server_ref = rdt_request.get_ref_num()
             
-            expected_ref_num = self.sequence_number + 1
-            if self.server_reference_number != expected_ref_num:
-                logger.error(f"Reference number incorrecto: {self.server_reference_number}, esperado: {expected_ref_num}")
+            # Validar que el servidor confirma mi handshake inicial
+            if server_seq != self.client_seq_num:
+                logger.error(f"Server SEQ incorrecto: {server_seq}, esperado: {self.client_seq_num}")
+                return False
+                
+            if server_ref != self.client_seq_num + 1:
+                logger.error(f"Server REF incorrecto: {server_ref}, esperado: {self.client_seq_num + 1}")
                 return False
             
+            # Guardar información del servidor
+            self.server_seq_num = server_seq
+            self.server_ref_num = server_ref
+            
+            # Configurar mis números para la comunicación
+            # Mi próximo SEQ será el que el servidor espera (server_ref)
+            # Mi REF será el próximo que espero recibir del servidor (server_seq + 1)
+            self.client_seq_num = server_ref
+            self.client_ref_num = server_seq + 1
+            
             self.handshake_completed = True
-            logger.info("Handshake completado exitosamente")
+            logger.info(f"Handshake completado. Cliente configurado: SEQ={self.client_seq_num}, REF={self.client_ref_num}")
             return True
             
         except Exception as e:
-            logger.error(f"Error parseando respuesta de handshake: {e}")
+            logger.error(f"Error procesando respuesta de handshake: {e}")
             return False
     
-    def is_handshake_completed(self) -> bool:
-        """Verifica si el handshake fue completado."""
-        return self.handshake_completed
+    def get_next_sequence_number(self) -> int:
+        """Obtiene el siguiente sequence number para enviar."""
+        return self.client_seq_num
     
-    def get_server_sequence_number(self) -> Optional[int]:
-        """Obtiene el número de secuencia del servidor."""
-        return self.server_sequence_number
+    def get_current_reference_number(self) -> int:
+        """Obtiene el reference number actual."""
+        return self.client_ref_num
     
-    def get_server_reference_number(self) -> Optional[int]:
-        """Obtiene el número de referencia del servidor."""
-        return self.server_reference_number
+    def increment_sequence_number(self) -> None:
+        """Incrementa el sequence number después de enviar un mensaje exitosamente."""
+        self.client_seq_num += 1
+        logger.debug(f"Sequence number incrementado a: {self.client_seq_num}")
+    
+    def update_reference_number(self, new_ref_num: int) -> None:
+        """Actualiza el reference number basado en el ACK recibido."""
+        self.client_ref_num = new_ref_num
+        logger.debug(f"Reference number actualizado a: {self.client_ref_num}")
     
     def get_max_window(self) -> int:
         """Obtiene el tamaño máximo de ventana."""
         return self.max_window
+    
+    def is_handshake_completed(self) -> bool:
+        """Verifica si el handshake fue completado."""
+        return self.handshake_completed
     
     def is_stop_and_wait(self) -> bool:
         """Verifica si el protocolo es Stop and Wait."""
@@ -186,90 +213,14 @@ class RdtHandshake:
     def is_go_back_n(self) -> bool:
         """Verifica si el protocolo es Go Back N."""
         return self.max_window > 1
-
-class ConnectionState:
-    """
-    Maneja el estado de la conexión después del handshake.
-    Gestiona dinámicamente sequence numbers y reference numbers.
-    """
     
-    def __init__(self, handshake_info: dict):
-        """
-        Inicializa el estado de la conexión basado en la información del handshake.
-        
-        Args:
-            handshake_info (dict): Información del handshake completado
-        """
-        self.max_window = handshake_info['max_window']
-        self.server_seq_num = handshake_info['server_seq_num']
-        self.server_ref_num = handshake_info['server_ref_num']
-        
-        self.client_seq_num = 1
-        self.client_ref_num = self.server_seq_num + 1
-        
-        logger.info(f"Estado de conexión inicializado: client_seq={self.client_seq_num}, client_ref={self.client_ref_num} (basado en server_seq={self.server_seq_num})")
+    def get_server_sequence_number(self) -> Optional[int]:
+        """Obtiene el número de secuencia del servidor."""
+        return self.server_seq_num
     
-    def get_next_sequence_number(self) -> int:
-        """
-        Obtiene el siguiente sequence number para enviar.
-        
-        Returns:
-            int: Sequence number actual (no lo incrementa)
-        """
-        return self.client_seq_num
-    
-    def get_current_reference_number(self) -> int:
-        """
-        Obtiene el reference number actual.
-        
-        Returns:
-            int: Reference number actual
-        """
-        return self.client_ref_num
-    
-    def increment_sequence_number(self) -> None:
-        """
-        Incrementa el sequence number después de enviar un mensaje exitosamente.
-        """
-        self.client_seq_num += 1
-        logger.debug(f"Sequence number incrementado a: {self.client_seq_num}")
-    
-    def update_reference_number(self, new_ref_num: int) -> None:
-        """
-        Actualiza el reference number basado en el ACK recibido.
-        
-        Args:
-            new_ref_num (int): Nuevo reference number del ACK
-        """
-        self.client_ref_num = new_ref_num
-        logger.debug(f"Reference number actualizado a: {self.client_ref_num}")
-    
-    def get_max_window(self) -> int:
-        """
-        Obtiene el tamaño máximo de ventana.
-        
-        Returns:
-            int: Tamaño máximo de ventana
-        """
-        return self.max_window
-    
-    def is_stop_and_wait(self) -> bool:
-        """
-        Verifica si el protocolo es Stop and Wait.
-        
-        Returns:
-            bool: True si es Stop and Wait
-        """
-        return self.max_window == 1
-    
-    def is_go_back_n(self) -> bool:
-        """
-        Verifica si el protocolo es Go Back N.
-        
-        Returns:
-            bool: True si es Go Back N
-        """
-        return self.max_window > 1
+    def get_server_reference_number(self) -> Optional[int]:
+        """Obtiene el número de referencia del servidor."""
+        return self.server_ref_num
 
 
 class RdtClient:
@@ -294,7 +245,7 @@ class RdtClient:
         self.sock.settimeout(HANDSHAKE_TIMEOUT)
         self.lock = threading.Lock()
         self.closed_by_server = False
-        self.handshake = RdtHandshake(max_window)
+        self.connection_state = ConnectionState(max_window)
         self.connected = False
         self.stats = {
             'packets_sent': 0,
@@ -320,7 +271,7 @@ class RdtClient:
                 logger.info(f"Intento de handshake {attempt + 1}/{HANDSHAKE_MAX_ATTEMPTS}")
                 
                 # Enviar handshake inicial
-                handshake_msg = self.handshake.create_handshake_request()
+                handshake_msg = self.connection_state.create_handshake_request()
                 self.send(handshake_msg.to_bytes())
                 logger.info("Handshake inicial enviado")
                 
@@ -338,7 +289,7 @@ class RdtClient:
                 # Parsear respuesta
                 rdt_request = RdtRequest(address=f"{self.host}:{self.port}", request=data)
                 
-                if self.handshake.parse_handshake_response(rdt_request):
+                if self.connection_state.process_handshake_response(rdt_request):
                     self.connected = True
                     logger.info("Conexión establecida exitosamente")
                     return True
@@ -406,22 +357,16 @@ class RdtClient:
         Returns:
             bool: True si está conectado
         """
-        return self.connected and self.handshake.is_handshake_completed()
+        return self.connected and self.connection_state.is_handshake_completed()
 
-    def get_handshake_info(self) -> dict:
+    def get_connection_state(self) -> ConnectionState:
         """
-        Obtiene información del handshake completado.
+        Obtiene el estado de la conexión.
         
         Returns:
-            dict: Información del handshake
+            ConnectionState: Estado actual de la conexión
         """
-        return {
-            'max_window': self.handshake.get_max_window(),
-            'server_seq_num': self.handshake.get_server_sequence_number(),
-            'server_ref_num': self.handshake.get_server_reference_number(),
-            'is_stop_and_wait': self.handshake.is_stop_and_wait(),
-            'is_go_back_n': self.handshake.is_go_back_n()
-        }
+        return self.connection_state
 
     def get_stats(self) -> Dict[str, Any]:
         """
@@ -443,24 +388,6 @@ class RdtClient:
         self.sock.close()
         logger.info("Conexión cerrada")
 
-# TODO: ver si usaremos esto
-def calculate_file_hash(file_path: Path) -> str:
-    """
-    Calcula el hash MD5 de un archivo para verificar integridad.
-    
-    Args:
-        file_path (Path): Ruta del archivo
-        
-    Returns:
-        str: Hash MD5 del archivo
-    """
-    hash_md5 = hashlib.md5()
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_md5.update(chunk)
-    return hash_md5.hexdigest()
-
-
 def validate_file_size(file_path: Path, max_size_mb: int = MAX_FILE_SIZE_MB) -> Tuple[bool, Optional[int]]:
     """
     Valida que el archivo no exceda el tamaño máximo.
@@ -477,32 +404,3 @@ def validate_file_size(file_path: Path, max_size_mb: int = MAX_FILE_SIZE_MB) -> 
     if file_size > max_size_bytes:
         return False, ERR_TOO_BIG
     return True, None
-
-
-def create_upload_request(filename: str, file_size: int, protocol: str, window_size: int = 1) -> bytes:
-    """
-    Crea un mensaje de solicitud de upload usando RdtMessage.
-    
-    Args:
-        filename (str): Nombre del archivo
-        file_size (int): Tamaño del archivo en bytes
-        protocol (str): Protocolo a usar ("stop-and-wait" o "go-back-n")
-        window_size (int): Tamaño de ventana
-        
-    Returns:
-        bytes: Mensaje de solicitud formateado
-    """
-    # Crear un mensaje de handshake con la información del upload
-    # El servidor interpretará esto como una solicitud de upload
-    proto_code = PROTO_STOP_WAIT if protocol == "stop-and-wait" else PROTO_GBN
-    request_data = f"{filename}|{file_size}|{proto_code}|{window_size}|{CHUNK_SIZE}".encode('utf-8')
-    
-    upload_msg = RdtMessage(
-        flag=FLAG_DATA,
-        max_window=window_size,
-        seq_num=0,
-        ref_num=0,
-        data=request_data
-    )
-    
-    return upload_msg.to_bytes()

@@ -120,7 +120,9 @@ def upload_file(args):
             client.close()
             return True
         else:
-            print("Handshake falló")
+            print(f"Protocolo no soportado: {args.protocol}")
+            from .rdt_client import get_error_message, ERR_INVALID_PROTOCOL
+            print(f"Código de error: {get_error_message(ERR_INVALID_PROTOCOL)}")
             return False
             
     except Exception as e:
