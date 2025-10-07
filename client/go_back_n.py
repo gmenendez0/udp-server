@@ -191,7 +191,6 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str, max
         current_chunk_index = 0
         
         while not file_fully_read or base < next_seq_num:
-            
             while next_seq_num < base + window_size and not file_fully_read:
                 if current_chunk_index >= total_chunks:
                     file_fully_read = True
