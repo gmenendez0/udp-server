@@ -1,43 +1,46 @@
-from enum import Enum
+#!/usr/bin/env python3
+"""
+Implementación del protocolo DP (Data Protocol) para señales de control.
+"""
 
-class FunctionFlag(Enum):
-    NONE = 0
-    CLOSE_CONN = 1
+from enum import IntEnum
+from typing import Optional
 
-# Obsoleto pero se me ocurre que podriamos generar una dp_control y una dp_data
-# y que el handler decida que hacer con cada una
+class FunctionFlag(IntEnum):
+    """Flags de función para el protocolo DP"""
+    CLOSE_CONN = 0x10
+    ERROR = 0x7F
+
 class DPRequest:
     """
-    {function flag}_{uuid}_payload
+    Clase para manejar requests del protocolo DP.
     """
-    def __init__(self, raw: bytes):
-        # Separadores
-        first_us_idx = raw.index(b"_")
-        second_us_idx = raw.index(b"_", first_us_idx + 1)
-
-        # Function flag (un dígito al inicio)
-        func_value = int(raw[:first_us_idx])
-        try:
-            self.function_flag: FunctionFlag = FunctionFlag(func_value)
-        except ValueError:
-            self.function_flag: FunctionFlag = FunctionFlag.NONE
-
-        # UUID
-        self.uuid: str = raw[first_us_idx + 1:second_us_idx].decode()
-
-        # Payload
-        self.payload: bytes = raw[second_us_idx + 1:]
-
-    @classmethod
-    def from_user_input(cls, function_flag, uuid: str, payload: str):
+    
+    def __init__(self, data: bytes):
         """
-        Construye un DPRequest a partir de datos "lógicos" (lado cliente).
+        Inicializa un DPRequest desde bytes.
+        
+        Args:
+            data (bytes): Datos del request
         """
-        raw = f"{function_flag.value}{uuid}_{payload}".encode()
-        return cls(raw)
-
-    def serialize(self) -> bytes:
-        """
-        Devuelve el formato en bytes para enviar por red.
-        """
-        return f"{self.function_flag.value}{self.uuid}_{self.payload.decode()}".encode()
+        self.data = data
+        self.function_flag: Optional[FunctionFlag] = None
+        
+        if len(data) >= 1:
+            try:
+                self.function_flag = FunctionFlag(data[0])
+            except ValueError:
+                # No es un flag válido, asumir que es un request normal
+                self.function_flag = None
+    
+    def is_close_connection(self) -> bool:
+        """Verifica si es una señal de cierre de conexión"""
+        return self.function_flag == FunctionFlag.CLOSE_CONN
+    
+    def is_error(self) -> bool:
+        """Verifica si es una señal de error"""
+        return self.function_flag == FunctionFlag.ERROR
+    
+    def get_data(self) -> bytes:
+        """Obtiene los datos del request"""
+        return self.data

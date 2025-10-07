@@ -1,4 +1,3 @@
-from .dp_request import DPRequest, FunctionFlag  # {func}_{uuid}_{data}
-from .dp_control_request import DPControlRequest
+from .dp_request import DPRequest, FunctionFlag
 
-__all__ = ["DPRequest", "FunctionFlag", "DPControlRequest"] 
+__all__ = ["DPRequest", "FunctionFlag"]
