@@ -100,9 +100,9 @@ def remove_prefix(data: bytes, expected_prefix: bytes) -> bytes:
     Returns:
         bytes: Datos sin prefijo
     """
-    if data.startswith(expected_prefix):
-        return data[len(expected_prefix):]
-    return data
+   
+    return data[2:]
+    
 
 def validate_prefix(data: bytes, expected_prefix: bytes) -> tuple[bool, str]:
     """
