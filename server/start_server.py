@@ -37,7 +37,7 @@ def main():
     server = rdt_server.RDTServer(
         host=args.host, 
         port=args.port, 
-        buffer_size=1024, 
+        buffer_size=2048,
         conn_repo=conn_repo
     )
 

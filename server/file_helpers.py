@@ -24,7 +24,5 @@ def get_file_size_in_bytes(filename) -> int | None:
 
 def append_bytes_to_file(filename, bytes) -> None:
     """Añade bytes al final de un archivo"""
-    print(f"Bytes a añadir: \n")
-    print(bytes)
     with open(filename, 'ab') as file:
         file.write(bytes)

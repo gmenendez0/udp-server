@@ -187,8 +187,6 @@ def handle_upload_stop_and_wait(path: Path, host: str, port: int, filename: str,
                     ref_num=connection_state.get_current_reference_number(),
                     data=chunk
                 )
-                print(f"chunk: ")
-                print(f"{chunk}")
                 
                 client.send(rdt_msg.to_bytes())
                 logger.info(f"Enviado chunk seq={current_seq} ({current_chunk}/{total_chunks}), esperando ACK...")
