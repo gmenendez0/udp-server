@@ -123,8 +123,54 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str, max
             else:
                 logger.error("Servidor no envió ACK para mensaje inicial")
                 return False
+        
+        # Esperar mensaje D_OK o E_ después del ACK inicial
+        data, _, close_signal = client.receive()
+        if close_signal:
+            logger.info("Servidor solicitó cerrar la conexión.")
+            return True
+        if not data:
+            logger.error("Timeout esperando confirmación D_OK/E_ del servidor")
+            return False
+        
+        try:
+            rdt_response = RdtRequest(address=f"{host}:{port}", request=data)
+            
+            if rdt_response.is_error():
+                error_code = rdt_response.get_error_code()
+                logger.error(f"Error del servidor: {get_error_message(error_code)}")
+                return False
+            
+            response_data = rdt_response.get_data()
+            if response_data:
+                try:
+                    response_text = response_data.decode('utf-8', errors='ignore')
+                    if response_text.startswith('D_OK'):
+                        logger.info("Servidor confirmó que está listo para recibir el archivo")
+                    elif response_text.startswith('E_'):
+                        logger.error(f"Error del servidor: {response_text}")
+                        return False
+                    else:
+                        logger.error(f"Respuesta inesperada del servidor: {response_text}")
+                        return False
+                except:
+                    logger.error("Error decodificando respuesta del servidor")
+                    return False
+            
+            # Enviar ACK de confirmación para el mensaje D_OK/E_
+            ack_msg = RdtMessage(
+                flag=FLAG_ACK,
+                max_window=connection_state.get_max_window(),
+                seq_num=connection_state.get_next_sequence_number(),
+                ref_num=connection_state.get_next_sequence_number() + 1,
+                data=b''
+            )
+            client.send(ack_msg.to_bytes())
+            logger.info("ACK enviado para confirmación del servidor")
+            connection_state.increment_sequence_number()
+            
         except Exception as e:
-            logger.error(f"Error parseando ACK del mensaje inicial: {e}")
+            logger.error(f"Error parseando confirmación del servidor: {e}")
             return False
 
         with open(path, "rb") as file:
