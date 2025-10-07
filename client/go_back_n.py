@@ -232,16 +232,20 @@ def handle_upload_go_back_n(path: Path, host: str, port: int, filename: str, max
                         return False
                     
                     if rdt_response.is_ack():
-                        ack_num = rdt_response.get_ref_num()
-                        logger.info(f"ACK recibido con ref_num={ack_num}")
+                        ack_num = rdt_response.get_ref_num()  # ref_num del servidor (próximo paquete del cliente que espera)
+                        server_seq = rdt_response.get_seq_num()  # seq_num del servidor (su número de secuencia)
+                        logger.info(f"ACK recibido: ref_num={ack_num}, seq_num={server_seq}")
                         
-                        if ack_num >= base:
-                            # El servidor confirma el paquete ack_num, entonces la nueva base es ack_num + 1
-                            for i in range(base, ack_num + 1):
+                        if ack_num > base:
+                            # El servidor espera el paquete ack_num, confirmó hasta ack_num-1
+                            # Limpiamos paquetes confirmados
+                            for i in range(base, ack_num):
                                 if i in sent_packets:
                                     del sent_packets[i]
-                            base = ack_num 
-                            connection_state.update_reference_number(ack_num + 1)
+                            base = ack_num  # Nueva base: primer paquete no confirmado
+                            
+                            # Actualizar client_ref_num basándose en el seq_num del servidor
+                            connection_state.update_reference_number(server_seq + 1)
                             logger.info(f"Ventana deslizada. Nueva base={base}")
                             
                 except Exception as e:
