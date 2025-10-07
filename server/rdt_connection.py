@@ -127,12 +127,11 @@ class RdtConnection:
 
         # Determinar operacion a ejecutar
         parts = data.split()
-        command = parts[0]
 
-        if command == DOWNLOAD_COMMAND:
+        if parts[0] == DOWNLOAD_COMMAND:
             filename = parts[1]
             self._handle_download_request(filename, rdt_request)
-        elif command == UPLOAD_COMMAND:
+        elif parts[0] == UPLOAD_COMMAND:
             filename = parts[1]
             filesize = int(parts[2])
             self._handle_upload_request(filename, filesize, rdt_request)
@@ -142,8 +141,10 @@ class RdtConnection:
     def _handle_upload_request(self, filename: str, filesize: int, rdt_request: RdtRequest) -> None:
         logger.info(f"Solicitud de subida de {self.address} para el archivo {filename} de tamaño {filesize}")
 
+        # Enviamos ACK del request
         self._send_ack_response(rdt_request.get_seq_num() + 1)
 
+        # Verificamos que el archivo que se quiere subir no este ya presente y que no exceda el tamaño maximo permitido
         filepath = os.path.join(STORAGE_PATH, filename)
         file_already_exists = get_file_size_in_bytes(filepath) is not None
 
@@ -159,26 +160,40 @@ class RdtConnection:
             self.shutdown()
             return
 
+        # Preparamos la conexion para la subida
         self.current_operation = "UPLOAD"
         self.current_filename = filename
         self.current_filesize = filesize
         self.bytes_received = 0
 
-        self._send_data_response(b"D_OK")
+        # Creamos la respuesta de ok y la enviamos
+        ok_res = RdtResponse.new_data_response(self.max_window, self.seq_num, self.ref_num, b"D_OK")
+        self._send_response(ok_res.message.to_bytes())
+
+        # Enviada la respuesta de ok, actualizamos el seq_num y marcamos el paquete como en vuelo y prendemos el timer de retransmision
+        self.seq_num += 1
+        self.packets_on_fly.append(ok_res)
+        self._start_retransmission_timer()
+
         logger.info(f"Preparado para recibir archivo {filename} de tamaño {filesize} de {self.address}")
 
     def _handle_upload_data(self, rdt_request: RdtRequest) -> None:
+        # Obtener la data del archivo
         data = rdt_request.get_data()
         file_data = data[2:]  # Sacar el prefijo "D_"
 
+        # Appendear los bytes al archivo
         filepath = os.path.join(STORAGE_PATH, self.current_filename)
         append_bytes_to_file(filepath, file_data)
 
+        # Actualizar el contador de bytes recibidos
         self.bytes_received += len(file_data)
         logger.info(f"Recibidos {self.bytes_received}/{self.current_filesize} bytes de {self.address} para el archivo {self.current_filename}")
 
+        # Enviar ACK
         self._send_ack_response(rdt_request.get_seq_num() + 1)
 
+        # Verificar si la transferencia está completa. En caso que si, cerrar la conexion
         if rdt_request.is_last() or self.bytes_received >= self.current_filesize:
             logger.info(f"Archivo {self.current_filename} recibido completamente de {self.address}")
             self.shutdown()
@@ -186,21 +201,27 @@ class RdtConnection:
     def _handle_download_request(self, filename: str, rdt_request: RdtRequest) -> None:
         logger.info(f"Solicitud de descarga de {self.address} para el archivo {filename}")
 
+        # Enviar ACK del request
         self._send_ack_response(rdt_request.get_seq_num() + 1)
+
+        # Verificar que el archivo exista
         filepath = os.path.join(STORAGE_PATH, filename)
         filesize = get_file_size_in_bytes(filepath)
 
+        # Si no existe, respondemos con error y cerramos la conexion
         if filesize is None:
             logger.error(f"Archivo {filename} no encontrado para {self.address}")
             self._send_error_response(b'FILE_NOT_FOUND')
             self.shutdown()
             return
 
+        # Si existe, preparamos la transferencia
         self.current_operation = "DOWNLOAD"
         self.current_filename = filename
         self.current_filesize = filesize
         self.bytes_sent = 0
 
+        # Cargamos el archivo a memoria
         logger.info(f"Cargando archivo {filename} en memoria de tamaño {filesize} para {self.address}.")
         self.pending_data_chunks = get_file_in_chunks(filepath, CHUNK_SIZE)
         logger.info(f"Archivo {filename} cargado en memoria. Listo para enviar {len(self.pending_data_chunks)} chunks.")
@@ -211,26 +232,37 @@ class RdtConnection:
     def _send_window_packages(self) -> None:
         packets_sent = 0
 
+        # Mientras haya espacio en la ventana para enviar mas paquetes y queden paquetes para enviar...
         while len(self.packets_on_fly) < self.max_window and len(self.pending_data_chunks) > 0:
+            # Obtengo el chunk a enviar y le agrego el prefijo de data
             chunk = self.pending_data_chunks.pop(0)
             data_with_prefix = b"D_" + chunk
 
+            # Encapsulo la data en una RdtResponse
             is_last = len(self.pending_data_chunks) == 0
-
             if not is_last:
                 response = RdtResponse.new_data_response(self.max_window, self.seq_num, self.ref_num, data_with_prefix)
             else:
                 response = RdtResponse.new_last_response(self.max_window, self.seq_num, self.ref_num, data_with_prefix)
 
+            # Envio la respuesta
             self._send_response(response.message.to_bytes())
 
+            # Marco la respuesta como en vuelo
             self.packets_on_fly.append(response)
+
+            # Si es el primer paquete enviado, actualizo la base de la ventana
+            if self.base_seq == 0 and packets_sent == 0:
+                self.base_seq = self.seq_num
+
+            # Actualizo contadores
             self.seq_num += 1
             self.bytes_sent += len(chunk)
             packets_sent += 1
 
             logger.info(f"Paquete enviado a {self.address} con seq_num {self.seq_num}. Total bytes enviados: {self.bytes_sent}/{self.current_filesize}")
 
+        # Si se envio algun paquete y no habia un timer previo activo, iniciarlo
         if packets_sent > 0 and self.retransmission_timer is None:
             self._start_retransmission_timer()
 
@@ -240,6 +272,7 @@ class RdtConnection:
 
         # Si estamos en download, continuar enviando ventana
         if self.current_operation == "DOWNLOAD":
+            # Si me estan ackeando un paquete el cual no es el base de la ventana:
             if ack_num > self.base_seq:
                 # Quitamos de on fly aquellos paquetes que nos indica el cliente que llegaron
                 self.packets_on_fly = [pkt for pkt in self.packets_on_fly if pkt.message.seq_num >= ack_num]
@@ -259,19 +292,21 @@ class RdtConnection:
 
                 # Enviamos más paquetes si hay espacio en la ventana
                 self._send_window_packages()
+            # Si me estan ackeando el base de la ventana y es el mismo que el ultimo ack recibido:
             elif ack_num == self.base_seq and ack_num == self.last_ack_num:
                 self.duplicate_ack_count += 1
                 logger.warning(f"ACK duplicado (>1) recibido de {self.address} con ref_num {ack_num}. Contador de duplicados: {self.duplicate_ack_count}")
 
                 if self.duplicate_ack_count >= FAST_RETRANSMIT_THRESHOLD:
                     self._fast_retransmit()
+            # Si solo me estan ackeando el base de la ventana:
             elif ack_num == self.base_seq:
                 logger.warning(f"Primer ACK duplicado recibido de {self.address} con ref_num {ack_num}.")
                 self.duplicate_ack_count = 1
                 self.last_ack_num = ack_num
+            # Si no:
             else:
                 logger.warning(f"ACK fuera de orden recibido de {self.address} con ref_num {ack_num}. Ignorando")
-
 
             # Si no quedan paquetes en vuelo y no hay más datos por enviar, cerrar conexión
             if len(self.packets_on_fly) == 0 and len(self.pending_data_chunks) == 0:
@@ -309,7 +344,7 @@ class RdtConnection:
             self.retransmission_timer = None
 
     def _handle_retransmission_timeout(self) -> None:
-        if not self.is_active or self.current_operation != "DOWNLOAD":
+        if not self.is_active:
             return
 
         self.retransmission_attempts += 1
